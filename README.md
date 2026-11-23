@@ -13,6 +13,8 @@ Signs you in to the ABES Engineering College Wi-Fi (Sophos login page at
    to the portal's `login.xml` over the Wi-Fi network itself, then shows *signed in*, *wrong password*
    or *failed* (with the portal's own message) in the notification. It tries once per Wi-Fi
    connection, so a wrong password is never resent.
+   **Security:** your password is only sent to a server presenting the real ABES portal certificate
+   (pinned in `PortalCert`). A fake hotspot imitating the address gets nothing, and you're told why.
 4. **Fallback:** tap the notification to open the login page in the app; it fills in and submits
    the form for you (fields `username`, `password`, `loginbutton`) and closes once you're signed in.
 5. **Sign out** from the app. You stay signed out until the next time you connect to ABES Wi-Fi.
@@ -35,16 +37,23 @@ Signs you in to the ABES Engineering College Wi-Fi (Sophos login page at
 
 1. Install the APK, open **ABES Wi-Fi Client**, enter your username and password, tap *Save*.
 2. Allow notifications when asked (monitoring still runs if you don't, you just won't see status).
-3. If monitoring stops in the background, set the app's battery usage to *Unrestricted*.
+3. When asked, let the app run in the background (battery: *Unrestricted*). On Xiaomi, Oppo, Vivo,
+   Realme and OnePlus phones also turn on *Autostart* for the app, or it may stop after a reboot.
+
+Works on Android 8.0 (API 26) and newer. No location permission, no Google Play Services.
+
+## If the college changes its certificate
+
+Auto-login will stop with "security certificate mismatch". On ABES Wi-Fi, get the new pin with
+`openssl s_client -connect 192.168.1.254:8090 </dev/null | openssl x509 -pubkey -noout | openssl pkey -pubin -outform der | openssl dgst -sha256 -binary | base64`,
+put it in `PortalCert.PIN`, update `app/src/test/resources/portal-leaf.pem`, and release an update.
 
 ## Limitations
 
-- Tested on a Vivo V2253 (Android 15) on ABES Wi-Fi: sign out → Wi-Fi off/on → automatic sign-in;
-  sign-in via the login page; retry after saving; restart after an app update. The release build was
-  checked for start-up and encrypted storage. The wrong-password reply was checked against the live
-  portal; a wrong password on the phone itself was not tried. Debug with `adb logcat -s DirectLogin`.
-- Vivo/Xiaomi/Oppo phones may block start-at-boot: allow *Autostart* for the app in phone settings.
-- The portal uses a self-signed certificate, which is accepted only for `192.168.1.254:8090`; all
-  other sites keep normal certificate checks. Because that certificate can't be verified, a fake
-  Wi-Fi network that copies this address could receive your password. Pinning the certificate on
-  first login would close that gap.
+- Tested on a Vivo V2253 (Android 15) on ABES Wi-Fi, release build: sign-out, Wi-Fi off/on →
+  automatic sign-in, wrong password (one attempt only), login page, certificate mismatch (nothing
+  sent), retry after saving, restart after update, battery prompt. Debug with
+  `adb logcat -s DirectLogin WifiMonitor`.
+- Not tested: phone reboot; a session expiring on its own while connected (the app reacts when
+  Android notices the Wi-Fi has lost internet, which can take a while).
+- `androidx.security-crypto` is deprecated by Google but still supported; migrate when it is removed.
