@@ -1,27 +1,41 @@
-# ABES Wi-Fi Client (beta source)
+# ABES Wi-Fi Client (beta)
 
-A minimal Android client based on the supplied ABESync APK's observed login form identifiers:
-`username`, `password`, and `loginbutton`.
+Signs you in to the ABES Engineering College Wi-Fi (Sophos login page at
+`https://192.168.1.254:8090/httpclient.html`) automatically.
+
+## How it works
+
+1. You save your college username and password once. They are stored encrypted on the phone
+   (AndroidX EncryptedSharedPreferences) and excluded from backups and phone-to-phone transfer.
+2. A background service watches Wi-Fi. It treats a network as ABES Wi-Fi when `192.168.1.254:8090`
+   answers on it (no Wi-Fi name or location permission needed).
+3. If ABES Wi-Fi is connected but not online, the app **signs in directly**: it sends your details
+   to the portal's `login.xml` over the Wi-Fi network itself, then shows *signed in*, *wrong password*
+   or *failed* (with the portal's own message) in the notification. It tries once per Wi-Fi
+   connection, so a wrong password is never resent.
+4. **Fallback:** tap the notification to open the login page in the app; it fills in and submits
+   the form for you (fields `username`, `password`, `loginbutton`).
 
 ## Build
 
-**Option A — GitHub (no Android Studio needed):** push this folder to a GitHub repo. The `Build APK` workflow runs automatically; download the APK from the run's *Artifacts* section.
-
-**Option B — Android Studio:** open this folder in Android Studio (recent stable version), allow Gradle sync, then choose **Build > Build Bundle(s) / APK(s) > Build APK(s)**. The APK is generated under `app/build/outputs/apk/debug/`.
+- **Locally:** `./gradlew assembleDebug` (needs JDK 17+ and the Android SDK; set `sdk.dir` in
+  `local.properties`). APK: `app/build/outputs/apk/debug/app-debug.apk`.
+- **Tests / checks:** `./gradlew testDebugUnitTest lint`
+- **GitHub:** push the repo; the *Build APK* workflow uploads the APK under the run's *Artifacts*.
 
 ## Install and use
 
-1. Install the debug APK on your Android phone.
-2. Open ABES Wi-Fi Client and enter your college username/password.
-3. Allow notifications when asked.
-4. When you join ABES Wi-Fi and the portal needs sign-in, a notification appears. Tap it; the app fills and submits the login form.
-5. If monitoring stops in the background, set the app's battery usage to *Unrestricted*.
+1. Install the APK, open **ABES Wi-Fi Client**, enter your username and password, tap *Save*.
+2. Allow notifications when asked (monitoring still runs if you don't, you just won't see status).
+3. If monitoring stops in the background, set the app's battery usage to *Unrestricted*.
 
-## Important beta limitations
+## Limitations
 
-- Not yet compiled or device-tested.
-- ABES detection = the portal host `192.168.1.254:8090` is reachable on the current Wi-Fi (no SSID or location permission needed).
-- The portal's self-signed certificate is accepted only for that exact host and port; all other sites keep normal certificate checks.
-- Android/OEM battery management can stop background monitoring; exempt the app from battery optimization if necessary.
-- The service detects the campus network and prompts you to open the portal. The WebView then attempts the original APK's observed form-fill/click sequence. It does not claim authentication succeeded until the portal visibly responds; final success-state detection still needs validation against the live portal.
-- Credential storage uses AndroidX EncryptedSharedPreferences. No credentials are sent anywhere except the configured campus portal.
+- Builds and passes lint and unit tests, but has **not yet been tested on a phone or against the
+  live portal**. The direct login follows the usual Sophos `login.xml` format; if the reply looks
+  different, the notification shows the portal's message and the tap-to-open fallback still works.
+- The portal uses a self-signed certificate, which is accepted only for `192.168.1.254:8090`; all
+  other sites keep normal certificate checks. Because that certificate can't be verified, a fake
+  Wi-Fi network that copies this address could receive your password. Pinning the certificate on
+  first login would close that gap.
+- Monitoring doesn't restart after a phone reboot until you open the app once.
