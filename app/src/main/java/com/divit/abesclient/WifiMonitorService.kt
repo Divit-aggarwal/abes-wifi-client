@@ -57,16 +57,16 @@ class WifiMonitorService : Service() {
         startForeground(NOTIF_ID, current ?: notification("Waiting for ABES Wi-Fi", false))
         when (intent?.action) {
             ACTION_SIGN_OUT -> io.execute { signOut() }
-            // New credentials saved, or signed in via the login page: re-check and allow one fresh attempt now.
+            // The user asked to sign in (Save, "Sign in now", or the login page finished): send a real login
+            // now. Don't trust Android's "online" flag here: some phones (seen on Android 17) keep it for a
+            // while after a sign-out. If already signed in, the portal just confirms it.
             ACTION_RETRY -> io.execute {
                 lastChecked = null
                 triedNetwork = null
                 signedOut = null
                 lastState = ""
-                wifi?.let {
-                    cm.reportNetworkConnectivity(it, true) // ask Android to re-check internet now
-                    check(it)
-                }
+                val network = wifi ?: return@execute
+                if (portalReachable(network)) autoLogin(network) else check(network)
             }
         }
         return START_STICKY

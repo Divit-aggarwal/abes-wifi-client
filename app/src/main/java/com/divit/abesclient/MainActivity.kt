@@ -90,7 +90,7 @@ class MainActivity : Activity() {
         setPadding(ui.dp(4), ui.dp(12), 0, ui.dp(4))
         addView(ImageView(this@MainActivity).apply {
             setImageResource(R.mipmap.ic_launcher)
-            background = ui.rounded(ui.brand, 14); clipToOutline = true
+            background = ui.rounded(0xFF1E5AA8.toInt(), 14); clipToOutline = true // the icon's own blue
             importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
         }, LinearLayout.LayoutParams(ui.dp(44), ui.dp(44)))
         addView(LinearLayout(this@MainActivity).apply {
@@ -222,6 +222,7 @@ class MainActivity : Activity() {
                 val hidden = pass.inputType and InputType.TYPE_TEXT_VARIATION_PASSWORD == InputType.TYPE_TEXT_VARIATION_PASSWORD
                 pass.inputType = InputType.TYPE_CLASS_TEXT or
                     (if (hidden) InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD else InputType.TYPE_TEXT_VARIATION_PASSWORD)
+                pass.typeface = android.graphics.Typeface.create("sans-serif", android.graphics.Typeface.NORMAL)
                 pass.setSelection(pass.text.length)
                 text = if (hidden) "Hide" else "Show"
                 contentDescription = if (hidden) "Hide password" else "Show password"
@@ -290,6 +291,7 @@ class MainActivity : Activity() {
                 12f, ui.muted).apply { setPadding(ui.dp(8), 0, 0, 0) })
         })
         addView(ui.label("Made by ${Developer.NAME} · About", 13f, ui.brand, 500).apply {
+            gravity = Gravity.CENTER
             setPadding(ui.dp(12), ui.dp(14), ui.dp(12), ui.dp(4))
             setOnClickListener { startActivity(Intent(this@MainActivity, AboutActivity::class.java)) }
         })

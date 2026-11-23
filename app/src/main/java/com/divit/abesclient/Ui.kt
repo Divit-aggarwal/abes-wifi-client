@@ -102,6 +102,7 @@ class Ui(private val ctx: Context) {
         this.hint = hint; textSize = 16f; setTextColor(this@Ui.text); setHintTextColor(muted); isSingleLine = true
         inputType = InputType.TYPE_CLASS_TEXT or
             (if (secret) InputType.TYPE_TEXT_VARIATION_PASSWORD else InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS)
+        typeface = Typeface.create("sans-serif", Typeface.NORMAL) // password fields default to monospace
         background = rounded(tint(this@Ui.text, if (dark) 0.06f else 0.035f), 14, outline)
         setPadding(dp(16), dp(14), dp(16), dp(14))
         layoutParams = LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { topMargin = dp(12) }
