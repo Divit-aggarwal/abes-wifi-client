@@ -1,4 +1,4 @@
-# ABES Wi-Fi Client (beta)
+# ABES Wi-Fi Client 1.0.0
 
 Signs you in to the ABES Engineering College Wi-Fi (Sophos login page at
 `https://192.168.1.254:8090/httpclient.html`) automatically.
@@ -14,12 +14,19 @@ Signs you in to the ABES Engineering College Wi-Fi (Sophos login page at
    or *failed* (with the portal's own message) in the notification. It tries once per Wi-Fi
    connection, so a wrong password is never resent.
 4. **Fallback:** tap the notification to open the login page in the app; it fills in and submits
-   the form for you (fields `username`, `password`, `loginbutton`).
+   the form for you (fields `username`, `password`, `loginbutton`) and closes once you're signed in.
+5. **Sign out** from the app. You stay signed out until the next time you connect to ABES Wi-Fi.
+6. Monitoring starts whenever you open the app, and restarts by itself after a reboot or app update.
 
 ## Build
 
-- **Locally:** `./gradlew assembleDebug` (needs JDK 17+ and the Android SDK; set `sdk.dir` in
+- **Debug:** `./gradlew assembleDebug` (needs JDK 17+ and the Android SDK; set `sdk.dir` in
   `local.properties`). APK: `app/build/outputs/apk/debug/app-debug.apk`.
+- **Release:** `./gradlew assembleRelease` → `app/build/outputs/apk/release/app-release.apk`
+  (shrunk with R8, signed). Signing reads `keystore.properties` (git-ignored):
+  `storeFile`, `storePassword`, `keyAlias`, `keyPassword`. Without it the release APK is unsigned.
+  **Back up the keystore and keystore.properties.** If you lose them, you can't ship updates:
+  phones will refuse to install a new version over the old one.
 - **Tests / checks:** `./gradlew testDebugUnitTest lint`
 - **GitHub:** push the repo; the *Build APK* workflow uploads the APK under the run's *Artifacts*.
 
@@ -31,12 +38,12 @@ Signs you in to the ABES Engineering College Wi-Fi (Sophos login page at
 
 ## Limitations
 
-- Tested on a Vivo V2253 (Android 15) on ABES Wi-Fi: the app starts, monitoring runs, and the
-  login page fallback signs in. The `login.xml` request format and the wrong-password reply were
-  checked against the live portal. The direct login itself has **not yet run on the phone**, because
-  it was already signed in; check it with `adb logcat -s DirectLogin` (look for `Login result:`).
+- Tested on a Vivo V2253 (Android 15) on ABES Wi-Fi: sign out → Wi-Fi off/on → automatic sign-in;
+  sign-in via the login page; retry after saving; restart after an app update. The release build was
+  checked for start-up and encrypted storage. The wrong-password reply was checked against the live
+  portal; a wrong password on the phone itself was not tried. Debug with `adb logcat -s DirectLogin`.
+- Vivo/Xiaomi/Oppo phones may block start-at-boot: allow *Autostart* for the app in phone settings.
 - The portal uses a self-signed certificate, which is accepted only for `192.168.1.254:8090`; all
   other sites keep normal certificate checks. Because that certificate can't be verified, a fake
   Wi-Fi network that copies this address could receive your password. Pinning the certificate on
   first login would close that gap.
-- Monitoring doesn't restart after a phone reboot until you open the app and tap *Save* again.
