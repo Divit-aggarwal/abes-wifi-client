@@ -1,0 +1,83 @@
+package com.divit.abesclient
+
+import android.Manifest
+import android.app.Activity
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.os.Build
+import android.os.Bundle
+import android.view.Gravity
+import android.widget.*
+import androidx.core.app.ActivityCompat
+import androidx.core.content.ContextCompat
+
+class MainActivity : Activity() {
+    private lateinit var user: EditText
+    private lateinit var pass: EditText
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        if (intent.getBooleanExtra("open_portal", false)) {
+            startActivity(Intent(this, PortalActivity::class.java)); finish(); return
+        }
+        val root = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL; setPadding(28, 36, 28, 24)
+        }
+        root.addView(TextView(this).apply { text = "ABES Wi-Fi Client"; textSize = 26f })
+        root.addView(TextView(this).apply {
+            text = "Save your college credentials once. The app notices when you join ABES Wi-Fi and notifies you when the portal needs sign-in."
+            textSize = 14f; setPadding(0, 12, 0, 20)
+        })
+        user = field("College username").also { root.addView(it) }
+        pass = field("College password", true).also { root.addView(it) }
+        user.setText(SecurePrefs.username(this)); pass.setText(SecurePrefs.password(this))
+        root.addView(Button(this).apply {
+            text = "Save credentials & enable monitoring"
+            setOnClickListener {
+                if (user.text.isBlank() || pass.text.isBlank()) { toast("Enter username and password first"); return@setOnClickListener }
+                SecurePrefs.save(this@MainActivity, user.text.toString().trim(), pass.text.toString())
+                requestPermissionsIfNeeded()
+                toast("Credentials saved on this device")
+            }
+        })
+        root.addView(Button(this).apply {
+            text = "Open login portal"
+            setOnClickListener { startActivity(Intent(this@MainActivity, PortalActivity::class.java)) }
+        })
+        root.addView(TextView(this).apply {
+            text = "Portal: ${Portal.URL}\n\nIf monitoring stops after a while, open Settings > Apps > ABES Wi-Fi Client > Battery and set it to Unrestricted."
+            textSize = 12f; setPadding(0, 20, 0, 0)
+        })
+        setContentView(ScrollView(this).apply { addView(root) })
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        if (intent.getBooleanExtra("open_portal", false)) startActivity(Intent(this, PortalActivity::class.java))
+    }
+
+    private fun field(hintText: String, secret: Boolean = false) = EditText(this).apply {
+        hint = hintText; textSize = 16f
+        if (secret) inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
+        else inputType = android.text.InputType.TYPE_CLASS_TEXT
+    }
+
+    private fun requestPermissionsIfNeeded() {
+        val needsNotif = Build.VERSION.SDK_INT >= 33 &&
+            ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        if (needsNotif) ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.POST_NOTIFICATIONS), 7)
+        else startMonitor()
+    }
+
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode != 7) return
+        if (grantResults.firstOrNull() != PackageManager.PERMISSION_GRANTED) toast("Notifications are off, so you won't see the sign-in alert")
+        startMonitor()
+    }
+    private fun startMonitor() {
+        ContextCompat.startForegroundService(this, Intent(this, WifiMonitorService::class.java))
+        toast("Wi-Fi monitoring enabled")
+    }
+    private fun toast(s: String) = Toast.makeText(this, s, Toast.LENGTH_LONG).show()
+}
