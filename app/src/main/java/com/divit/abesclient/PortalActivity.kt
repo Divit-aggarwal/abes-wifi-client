@@ -73,7 +73,7 @@ class PortalActivity : Activity() {
                     if (isPortalAddress && PortalCert.isPortal(x509(error.certificate))) return handler.proceed()
                     handler.cancel()
                     blocked = true
-                    status.setTextColor(ui.red)
+                    status.setTextColor(ui.red.ink)
                     status.text = if (isPortalAddress) "This is not the real ABES login page (its security certificate doesn't match). Blocked to protect your password."
                         else "Blocked an untrusted certificate from ${uri.host}"
                 }
@@ -93,7 +93,7 @@ class PortalActivity : Activity() {
                 override fun onReceivedError(view: WebView, request: WebResourceRequest, error: WebResourceError) {
                     if (request.isForMainFrame && request.url.host == Portal.HOST) {
                         status.text = "Can't reach the ABES login page. Are you connected to ABES Wi-Fi?"
-                        status.setTextColor(ui.amber)
+                        status.setTextColor(ui.amber.ink)
                     }
                 }
 

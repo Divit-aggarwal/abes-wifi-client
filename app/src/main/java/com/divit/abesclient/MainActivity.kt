@@ -1,11 +1,16 @@
 package com.divit.abesclient
 
 import android.Manifest
+import android.animation.ObjectAnimator
+import android.animation.PropertyValuesHolder
+import android.animation.ValueAnimator
 import android.annotation.SuppressLint
 import android.app.Activity
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.res.ColorStateList
+import android.graphics.Color
+import android.graphics.drawable.RippleDrawable
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -22,19 +27,23 @@ import androidx.core.app.ActivityCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import com.divit.abesclient.Ui.Style
+import com.divit.abesclient.Ui.Tone
 
 class MainActivity : Activity() {
     private lateinit var ui: Ui
     private lateinit var scroll: ScrollView
-    private lateinit var heroCard: LinearLayout
-    private lateinit var heroBadge: FrameLayout
-    private lateinit var heroIcon: ImageView
-    private lateinit var heroSpinner: ProgressBar
+    private lateinit var glowOuter: View
+    private lateinit var glowInner: View
+    private lateinit var core: FrameLayout
+    private lateinit var coreIcon: ImageView
+    private lateinit var coreSpinner: ProgressBar
+    private lateinit var chip: TextView
     private lateinit var heroTitle: TextView
     private lateinit var heroBody: TextView
     private lateinit var heroActions: LinearLayout
     private lateinit var accountCard: LinearLayout
     private lateinit var checksCard: LinearLayout
+    private var pulse: ObjectAnimator? = null
     private var editing = false
     private val onStatus: () -> Unit = { renderHero() }
 
@@ -49,14 +58,14 @@ class MainActivity : Activity() {
 
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(ui.dp(20), ui.dp(12), ui.dp(20), ui.dp(32))
+            setPadding(ui.dp(20), ui.dp(8), ui.dp(20), ui.dp(36))
         }
         root.addView(header())
         root.addView(buildHero())
-        root.addView(ui.sectionTitle("Your account"))
+        root.addView(ui.sectionTitle("Account"))
         accountCard = ui.card().also { root.addView(it) }
         root.addView(ui.sectionTitle("Keep it working"))
-        checksCard = ui.card().apply { setPadding(ui.dp(12), ui.dp(6), ui.dp(12), ui.dp(6)) }.also { root.addView(it) }
+        checksCard = ui.card().apply { setPadding(ui.dp(8), ui.dp(8), ui.dp(8), ui.dp(8)) }.also { root.addView(it) }
         root.addView(footer())
         // targetSdk 35: Android 15 draws behind the status/nav bars; pad content clear of them.
         scroll = ScrollView(this).apply { fitsSystemWindows = true; isFillViewport = true; addView(root) }
@@ -75,6 +84,7 @@ class MainActivity : Activity() {
 
     override fun onPause() {
         MonitorStatus.unlisten(onStatus)
+        pulse?.pause()
         super.onPause()
     }
 
@@ -87,98 +97,114 @@ class MainActivity : Activity() {
 
     private fun header() = LinearLayout(this).apply {
         orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
-        setPadding(ui.dp(4), ui.dp(12), 0, ui.dp(4))
-        addView(ImageView(this@MainActivity).apply {
-            setImageResource(R.mipmap.ic_launcher)
-            background = ui.rounded(0xFF1E5AA8.toInt(), 14); clipToOutline = true // the icon's own blue
-            importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
-        }, LinearLayout.LayoutParams(ui.dp(44), ui.dp(44)))
-        addView(LinearLayout(this@MainActivity).apply {
-            orientation = LinearLayout.VERTICAL; setPadding(ui.dp(14), 0, 0, 0)
-            addView(ui.label("ABES Wi-Fi", 22f, ui.text, 700))
-            addView(ui.label("Automatic campus sign-in", 14f, ui.muted))
-        }, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
+        setPadding(ui.dp(4), ui.dp(12), 0, 0)
+        addView(ui.label("ABES Wi-Fi", 24f, ui.text, 700), LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
         addView(ImageView(this@MainActivity).apply { // About the developer
-            setImageResource(R.drawable.ic_info); imageTintList = ColorStateList.valueOf(ui.muted)
-            setPadding(ui.dp(12), ui.dp(12), ui.dp(12), ui.dp(12))
-            background = android.graphics.drawable.RippleDrawable(ColorStateList.valueOf(ui.tint(ui.text, 0.1f)), null, null)
+            setImageResource(R.drawable.ic_info); imageTintList = ColorStateList.valueOf(ui.text)
+            setPadding(ui.dp(11), ui.dp(11), ui.dp(11), ui.dp(11))
+            background = RippleDrawable(ColorStateList.valueOf(ui.tint(ui.text, 0.12f)), ui.oval(ui.surface), null)
             contentDescription = "About the developer"
             setOnClickListener { startActivity(Intent(this@MainActivity, AboutActivity::class.java)) }
-        }, LinearLayout.LayoutParams(ui.dp(48), ui.dp(48)))
+        }, LinearLayout.LayoutParams(ui.dp(44), ui.dp(44)))
     }
 
-    // ---------- Status card ----------
+    // ---------- Status orb ----------
 
     private class Hero(
-        val color: Int, val icon: Int, val title: String, val body: String, val busy: Boolean = false,
+        val tone: Tone, val icon: Int, val chip: String, val title: String, val body: String, val busy: Boolean = false,
         val actions: List<Triple<String, Style, () -> Unit>> = emptyList()
     )
 
-    private fun buildHero(): LinearLayout {
-        heroCard = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(ui.dp(22), ui.dp(22), ui.dp(22), ui.dp(18))
-            layoutParams = LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { topMargin = ui.dp(20) }
+    private fun buildHero() = LinearLayout(this).apply {
+        orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER_HORIZONTAL
+        setPadding(0, ui.dp(28), 0, ui.dp(4))
+        glowOuter = View(this@MainActivity)
+        glowInner = View(this@MainActivity)
+        coreIcon = ImageView(this@MainActivity).apply {
+            imageTintList = ColorStateList.valueOf(Color.WHITE)
+            importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
         }
-        heroIcon = ImageView(this).apply { importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO }
-        heroSpinner = ProgressBar(this).apply { isIndeterminate = true }
-        heroBadge = FrameLayout(this).apply {
-            addView(heroIcon, FrameLayout.LayoutParams(ui.dp(28), ui.dp(28), Gravity.CENTER))
-            addView(heroSpinner, FrameLayout.LayoutParams(ui.dp(30), ui.dp(30), Gravity.CENTER))
+        coreSpinner = ProgressBar(this@MainActivity).apply {
+            isIndeterminate = true; indeterminateTintList = ColorStateList.valueOf(Color.WHITE)
         }
-        heroCard.addView(heroBadge, LinearLayout.LayoutParams(ui.dp(56), ui.dp(56)))
-        heroTitle = ui.label("", 24f, ui.text, 700).apply {
-            setPadding(0, ui.dp(16), 0, 0)
+        core = FrameLayout(this@MainActivity).apply {
+            elevation = ui.dp(10).toFloat()
+            addView(coreIcon, FrameLayout.LayoutParams(ui.dp(60), ui.dp(60), Gravity.CENTER))
+            addView(coreSpinner, FrameLayout.LayoutParams(ui.dp(64), ui.dp(64), Gravity.CENTER))
+        }
+        addView(FrameLayout(this@MainActivity).apply {
+            addView(glowOuter, FrameLayout.LayoutParams(ui.dp(232), ui.dp(232), Gravity.CENTER))
+            addView(glowInner, FrameLayout.LayoutParams(ui.dp(180), ui.dp(180), Gravity.CENTER))
+            addView(core, FrameLayout.LayoutParams(ui.dp(132), ui.dp(132), Gravity.CENTER))
+        }, LinearLayout.LayoutParams(ui.dp(232), ui.dp(232)))
+        pulse = ObjectAnimator.ofPropertyValuesHolder(glowOuter,
+            PropertyValuesHolder.ofFloat(View.SCALE_X, 0.86f, 1f),
+            PropertyValuesHolder.ofFloat(View.SCALE_Y, 0.86f, 1f),
+            PropertyValuesHolder.ofFloat(View.ALPHA, 1f, 0.35f)).apply {
+            duration = 1100; repeatCount = ValueAnimator.INFINITE; repeatMode = ValueAnimator.REVERSE
+        }
+        chip = ui.label("", 12f, ui.text, 700).apply {
+            letterSpacing = 0.12f; setPadding(ui.dp(14), ui.dp(6), ui.dp(14), ui.dp(6))
+        }
+        addView(chip, LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT).apply { topMargin = ui.dp(20) })
+        heroTitle = ui.label("", 28f, ui.text, 700).apply {
+            gravity = Gravity.CENTER; setPadding(0, ui.dp(12), 0, 0)
             accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE // read out status changes
         }
-        heroBody = ui.label("", 15f, ui.muted).apply { setPadding(0, ui.dp(6), 0, 0) }
-        heroActions = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(0, ui.dp(6), 0, 0) }
-        heroCard.addView(heroTitle); heroCard.addView(heroBody); heroCard.addView(heroActions)
-        return heroCard
+        heroBody = ui.label("", 15f, ui.muted).apply { gravity = Gravity.CENTER; setPadding(ui.dp(16), ui.dp(8), ui.dp(16), 0) }
+        heroActions = LinearLayout(this@MainActivity).apply { orientation = LinearLayout.VERTICAL; setPadding(0, ui.dp(12), 0, 0) }
+        addView(heroTitle, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
+        addView(heroBody, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
+        addView(heroActions, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
     }
 
     private fun currentHero(): Hero {
         val usePage = Triple("Use the login page instead", Style.TEXT, ::openPortal)
         val waiting = "You'll be signed in automatically as soon as you join ABES Wi-Fi."
-        if (!hasCredentials()) return Hero(ui.brand, R.drawable.ic_lock, "Set up automatic sign-in",
-            "Enter your ABES login once below. After that, the app signs you in every time you join campus Wi-Fi.")
+        if (!hasCredentials()) return Hero(ui.blue, R.drawable.ic_lock, "SET UP", "Sign in once",
+            "Save your ABES login below. After that, the app signs you in every time you join campus Wi-Fi.")
         return when (MonitorStatus.state) {
-            "online", "signed_in" -> Hero(ui.green, R.drawable.ic_check_circle, "You're online",
-                "Signed in to ABES Wi-Fi as ${SecurePrefs.username(this)}.",
+            "online", "signed_in" -> Hero(ui.green, R.drawable.ic_check_circle, "CONNECTED", "You're online",
+                "Signed in to ABES Wi-Fi as ${SecurePrefs.username(this)}",
                 actions = listOf(Triple("Sign out", Style.TONAL, ::signOut)))
-            "signing_in" -> Hero(ui.brand, R.drawable.ic_wifi, "Signing you in…", "Talking to the ABES login page.", busy = true)
-            "wrong_password" -> Hero(ui.amber, R.drawable.ic_error, "Wrong username or password",
-                "The ABES login page didn't accept your details. Check them and try again.",
+            "signing_in" -> Hero(ui.blue, R.drawable.ic_wifi, "SIGNING IN", "Signing you in…",
+                "Talking to the ABES login page", busy = true)
+            "wrong_password" -> Hero(ui.amber, R.drawable.ic_error, "ACTION NEEDED", "Wrong password",
+                "The ABES login page didn't accept your username or password.",
                 actions = listOf(Triple("Update login details", Style.PRIMARY, ::startEditing), usePage))
             "failed", "needs_login" -> {
                 val detail = MonitorStatus.message.substringAfter("failed (", "").substringBefore(")")
-                Hero(ui.amber, R.drawable.ic_error, "Couldn't sign you in",
+                Hero(ui.amber, R.drawable.ic_error, "ACTION NEEDED", "Couldn't sign you in",
                     if (detail.isNotBlank()) "The login page said: ${detail.replaceFirstChar { it.uppercase() }}." else "The login page didn't respond as expected.",
                     actions = listOf(Triple("Try again", Style.PRIMARY, ::retry), usePage))
             }
-            "signout_failed" -> Hero(ui.amber, R.drawable.ic_error, "Couldn't sign out",
+            "signout_failed" -> Hero(ui.amber, R.drawable.ic_error, "ACTION NEEDED", "Couldn't sign out",
                 "Make sure you're connected to ABES Wi-Fi, then try again.",
                 actions = listOf(Triple("Try again", Style.PRIMARY, ::signOut)))
-            "untrusted" -> Hero(ui.red, R.drawable.ic_shield, "This isn't the real ABES login page",
-                "This Wi-Fi is imitating the ABES login page, so your password was not sent. Connect to the official campus Wi-Fi.")
-            "signed_out" -> Hero(ui.muted, R.drawable.ic_logout, "Signed out",
+            "untrusted" -> Hero(ui.red, R.drawable.ic_shield, "BLOCKED", "Fake login page",
+                "This Wi-Fi is imitating the ABES login page, so your password was not sent.")
+            "signed_out" -> Hero(ui.gray, R.drawable.ic_logout, "SIGNED OUT", "You're signed out",
                 "You'll be signed in again the next time you connect.",
                 actions = listOf(Triple("Sign in now", Style.PRIMARY, ::retry)))
-            "other" -> Hero(ui.muted, R.drawable.ic_wifi, "Not on ABES Wi-Fi", waiting)
-            "lost" -> Hero(ui.muted, R.drawable.ic_wifi, "Wi-Fi disconnected", waiting)
-            else -> Hero(ui.muted, R.drawable.ic_wifi, "Waiting for Wi-Fi", waiting)
+            "other" -> Hero(ui.gray, R.drawable.ic_wifi, "NOT ON CAMPUS", "Not on ABES Wi-Fi", waiting)
+            "lost" -> Hero(ui.gray, R.drawable.ic_wifi, "OFFLINE", "Wi-Fi is off", waiting)
+            else -> Hero(ui.gray, R.drawable.ic_wifi, "WAITING", "Looking for ABES Wi-Fi", waiting)
         }
     }
 
     private fun renderHero() {
         val h = currentHero()
-        heroCard.background = ui.rounded(ui.tint(h.color, if (ui.dark) 0.14f else 0.08f), 24, ui.tint(h.color, 0.22f))
-        heroBadge.background = ui.rounded(ui.tint(h.color, if (ui.dark) 0.24f else 0.14f), 999)
-        heroIcon.setImageResource(h.icon)
-        heroIcon.imageTintList = ColorStateList.valueOf(h.color)
-        heroIcon.visibility = if (h.busy) View.INVISIBLE else View.VISIBLE
-        heroSpinner.visibility = if (h.busy) View.VISIBLE else View.GONE
-        heroSpinner.indeterminateTintList = ColorStateList.valueOf(h.color)
+        glowOuter.background = ui.oval(ui.tint(h.tone.light, if (ui.dark) 0.10f else 0.14f))
+        glowInner.background = ui.oval(ui.tint(h.tone.light, if (ui.dark) 0.18f else 0.22f))
+        core.background = ui.gradient(h.tone.light, h.tone.deep, oval = true)
+        coreIcon.setImageResource(h.icon)
+        coreIcon.visibility = if (h.busy) View.INVISIBLE else View.VISIBLE
+        coreSpinner.visibility = if (h.busy) View.VISIBLE else View.GONE
+        if (h.busy) { if (pulse?.isStarted == true) pulse?.resume() else pulse?.start() }
+        else { pulse?.cancel(); glowOuter.scaleX = 1f; glowOuter.scaleY = 1f; glowOuter.alpha = 1f }
+        chip.text = h.chip
+        chip.setTextColor(h.tone.ink)
+        chip.background = ui.rounded(ui.tint(h.tone.light, 0.16f), 999)
         heroTitle.text = h.title
         heroBody.text = h.body
         heroActions.removeAllViews()
@@ -190,33 +216,36 @@ class MainActivity : Activity() {
     private fun renderAccount() {
         accountCard.removeAllViews()
         if (!editing) {
+            accountCard.setPadding(ui.dp(16), ui.dp(16), ui.dp(12), ui.dp(16))
             accountCard.addView(LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
+                addView(ui.iconTile(R.drawable.ic_lock, ui.blue, 44))
                 addView(LinearLayout(this@MainActivity).apply {
-                    orientation = LinearLayout.VERTICAL
-                    addView(ui.label("College ID", 13f, ui.muted))
-                    addView(ui.label(SecurePrefs.username(this@MainActivity), 18f, ui.text, 500))
-                    addView(ui.label("Password saved securely", 13f, ui.muted).apply { setPadding(0, ui.dp(2), 0, 0) })
+                    orientation = LinearLayout.VERTICAL; setPadding(ui.dp(14), 0, ui.dp(8), 0)
+                    addView(ui.label(SecurePrefs.username(this@MainActivity), 17f, ui.text, 500))
+                    addView(ui.label("Password saved securely", 13f, ui.muted))
                 }, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
-                addView(ui.button("Change", Style.TONAL, ::startEditing).apply {
-                    layoutParams = LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT)
-                    minWidth = ui.dp(96); setPadding(ui.dp(20), 0, ui.dp(20), 0)
+                addView(ui.label("Change", 15f, ui.brand, 500).apply {
+                    setPadding(ui.dp(14), ui.dp(10), ui.dp(14), ui.dp(10))
+                    background = RippleDrawable(ColorStateList.valueOf(ui.tint(ui.brand, 0.15f)), null, ui.rounded(Color.BLACK, 999))
+                    setOnClickListener { startEditing() }
                 })
             })
             return
         }
+        accountCard.setPadding(ui.dp(20), ui.dp(20), ui.dp(20), ui.dp(16))
         val firstTime = !hasCredentials()
-        accountCard.addView(ui.label(if (firstTime) "Your ABES login" else "Update login details", 18f, ui.text, 500))
-        accountCard.addView(ui.label("The same username and password you use on the campus Wi-Fi page.", 14f, ui.muted)
+        accountCard.addView(ui.label(if (firstTime) "Your ABES login" else "Update login details", 18f, ui.text, 700))
+        accountCard.addView(ui.label("Same username and password as the campus Wi-Fi page.", 14f, ui.muted)
             .apply { setPadding(0, ui.dp(4), 0, ui.dp(4)) })
-        val user = ui.field("College ID / username").apply { setText(SecurePrefs.username(this@MainActivity)) }
+        val user = ui.field("College ID").apply { setText(SecurePrefs.username(this@MainActivity)) }
         val pass = ui.field("Password", secret = true).apply {
             setText(SecurePrefs.password(this@MainActivity))
-            setPadding(ui.dp(16), ui.dp(14), ui.dp(76), ui.dp(14))
+            setPadding(ui.dp(18), ui.dp(16), ui.dp(76), ui.dp(16))
             layoutParams = FrameLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT)
         }
         val toggle = ui.label("Show", 14f, ui.brand, 500).apply {
-            setPadding(ui.dp(16), ui.dp(12), ui.dp(16), ui.dp(12))
+            setPadding(ui.dp(16), ui.dp(12), ui.dp(18), ui.dp(12))
             contentDescription = "Show password"
             setOnClickListener {
                 val hidden = pass.inputType and InputType.TYPE_TEXT_VARIATION_PASSWORD == InputType.TYPE_TEXT_VARIATION_PASSWORD
@@ -253,48 +282,50 @@ class MainActivity : Activity() {
     private fun startEditing() {
         editing = true
         renderAccount()
-        accountCard.post { scroll.smoothScrollTo(0, accountCard.top - ui.dp(48)) }
+        accountCard.post { scroll.smoothScrollTo(0, accountCard.top - ui.dp(56)) }
     }
 
     // ---------- Keep it working ----------
 
     private fun renderChecks() {
         checksCard.removeAllViews()
+        val on = "On" to ui.green
+        val fix = "Fix" to ui.amber
         val notifOn = NotificationManagerCompat.from(this).areNotificationsEnabled()
-        checksCard.addView(ui.row(R.drawable.ic_bell, "Notifications",
-            if (notifOn) "Shows your Wi-Fi sign-in status" else "Turn on to see when you're signed in",
-            if (notifOn) "On" to ui.green else "Fix" to ui.amber) { openNotificationSettings() })
+        checksCard.addView(ui.row(R.drawable.ic_bell, ui.blue, "Notifications",
+            if (notifOn) "Shows your sign-in status" else "Turn on to see when you're signed in",
+            if (notifOn) on else fix) { openNotificationSettings() })
         checksCard.addView(ui.divider())
         val bgOn = (getSystemService(POWER_SERVICE) as PowerManager).isIgnoringBatteryOptimizations(packageName)
-        checksCard.addView(ui.row(R.drawable.ic_battery, "Run in background",
-            if (bgOn) "Allowed, so sign-in keeps working" else "Your phone may stop automatic sign-in",
-            if (bgOn) "On" to ui.green else "Fix" to ui.amber) { if (bgOn) openAppSettings() else askToRunInBackground() })
+        checksCard.addView(ui.row(R.drawable.ic_battery, ui.green, "Run in background",
+            if (bgOn) "Keeps automatic sign-in working" else "Your phone may stop automatic sign-in",
+            if (bgOn) on else fix) { if (bgOn) openAppSettings() else askToRunInBackground() })
         if (Build.MANUFACTURER.lowercase() in AUTOSTART_BRANDS) {
             checksCard.addView(ui.divider())
-            checksCard.addView(ui.row(R.drawable.ic_power, "Autostart",
-                "${Build.MANUFACTURER.replaceFirstChar { it.uppercase() }} phones need this on to keep working after a restart",
-                "Open" to ui.brand) { openAppSettings() })
+            checksCard.addView(ui.row(R.drawable.ic_power, ui.amber, "Autostart",
+                "Needed on ${Build.MANUFACTURER.replaceFirstChar { it.uppercase() }} phones after a restart", null) { openAppSettings() })
         }
         checksCard.addView(ui.divider())
-        checksCard.addView(ui.row(R.drawable.ic_open, "Open ABES login page", "Sign in by hand if something goes wrong", null, ::openPortal))
+        checksCard.addView(ui.row(R.drawable.ic_open, ui.gray, "Open login page", "Sign in by hand if needed", null, ::openPortal))
     }
 
     // ---------- Footer ----------
 
     private fun footer() = LinearLayout(this).apply {
         orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER_HORIZONTAL
-        setPadding(ui.dp(12), ui.dp(28), ui.dp(12), 0)
+        setPadding(ui.dp(16), ui.dp(32), ui.dp(16), 0)
         addView(LinearLayout(this@MainActivity).apply {
             orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER
-            addView(ui.icon(R.drawable.ic_lock, ui.muted, 14))
-            addView(ui.label("Your password is encrypted on this phone and only sent to the verified ABES login page.",
-                12f, ui.muted).apply { setPadding(ui.dp(8), 0, 0, 0) })
+            addView(ui.icon(R.drawable.ic_shield, ui.muted, 14))
+            addView(ui.label("Encrypted on your phone · sent only to ABES", 12f, ui.muted)
+                .apply { setPadding(ui.dp(6), 0, 0, 0) })
         })
-        addView(ui.label("Made by ${Developer.NAME} · About", 13f, ui.brand, 500).apply {
+        addView(ui.label("Made by ${Developer.NAME}", 13f, ui.brand, 500).apply {
             gravity = Gravity.CENTER
-            setPadding(ui.dp(12), ui.dp(14), ui.dp(12), ui.dp(4))
+            setPadding(ui.dp(16), ui.dp(12), ui.dp(16), ui.dp(12))
+            background = RippleDrawable(ColorStateList.valueOf(ui.tint(ui.brand, 0.15f)), null, ui.rounded(Color.BLACK, 999))
             setOnClickListener { startActivity(Intent(this@MainActivity, AboutActivity::class.java)) }
-        })
+        }, LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT).apply { topMargin = ui.dp(6) })
     }
 
     // ---------- Actions ----------
