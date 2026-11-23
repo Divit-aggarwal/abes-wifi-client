@@ -23,6 +23,7 @@ class WifiMonitorService : Service() {
     @Volatile private var wifi: Network? = null         // the current Wi-Fi connection, if any
     @Volatile private var triedNetwork: Network? = null // auto-login already attempted on this connection
     @Volatile private var signedOut: Network? = null    // user signed out: stay out until the next connection
+    private var lastChecked: Triple<Network, Boolean, Boolean>? = null // (network, online, portal-flagged); io thread only
 
     private val callback = object : ConnectivityManager.NetworkCallback() {
         override fun onAvailable(network: Network) {
@@ -31,6 +32,7 @@ class WifiMonitorService : Service() {
         }
         override fun onCapabilitiesChanged(network: Network, caps: NetworkCapabilities) = check(network, caps)
         override fun onLost(network: Network) {
+            io.execute { lastChecked = null }
             if (wifi == network) wifi = null
             triedNetwork = null
             signedOut = null
@@ -52,6 +54,7 @@ class WifiMonitorService : Service() {
             ACTION_SIGN_OUT -> io.execute { signOut() }
             // New credentials saved, or signed in via the login page: re-check and allow one fresh attempt now.
             ACTION_RETRY -> io.execute {
+                lastChecked = null
                 triedNetwork = null
                 signedOut = null
                 lastState = ""
@@ -74,6 +77,14 @@ class WifiMonitorService : Service() {
         io.execute {
             val c = caps ?: cm.getNetworkCapabilities(network) ?: return@execute
             if (!c.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)) return@execute
+            // Capabilities change constantly (e.g. signal strength). Only re-check when the network, its
+            // "online" status or Android's "login required" flag changes, to save battery.
+            val key = Triple(network,
+                c.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED),
+                c.hasCapability(NetworkCapabilities.NET_CAPABILITY_CAPTIVE_PORTAL))
+            if (key == lastChecked) return@execute
+            lastChecked = key
+            android.util.Log.i("WifiMonitor", "Checking Wi-Fi: online=${key.second} loginRequired=${key.third}")
             if (network == signedOut) return@execute // keep showing "Signed out"
             if (!portalReachable(network)) {
                 setState("other", "Connected to a non-ABES Wi-Fi", false)
@@ -103,6 +114,8 @@ class WifiMonitorService : Service() {
             }
             DirectLogin.Outcome.WRONG_PASSWORD ->
                 setState("wrong_password", "Wrong username or password. Open the app to fix it, or tap to open the login page.", true)
+            DirectLogin.Outcome.UNTRUSTED -> // e.g. a fake hotspot imitating the portal address
+                setState("untrusted", "This Wi-Fi's login page is not the real ABES one (security certificate mismatch). Your password was not sent.", false)
             DirectLogin.Outcome.FAILED ->
                 setState("failed", "Automatic sign-in failed (${result.message}). Tap to open the login page.", true)
         }

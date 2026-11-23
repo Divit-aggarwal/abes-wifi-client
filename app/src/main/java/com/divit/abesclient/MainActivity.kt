@@ -4,9 +4,11 @@ import android.Manifest
 import android.app.Activity
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
-import android.view.Gravity
+import android.os.PowerManager
+import android.provider.Settings
 import android.widget.*
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
@@ -21,12 +23,12 @@ class MainActivity : Activity() {
             startActivity(Intent(this, PortalActivity::class.java)); finish(); return
         }
         val root = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL; setPadding(28, 36, 28, 24)
+            orientation = LinearLayout.VERTICAL; setPadding(20.dp, 24.dp, 20.dp, 16.dp)
         }
         root.addView(TextView(this).apply { text = "ABES Wi-Fi Client"; textSize = 26f })
         root.addView(TextView(this).apply {
-            text = "Save your college credentials once. The app notices when you join ABES Wi-Fi and notifies you when the portal needs sign-in."
-            textSize = 14f; setPadding(0, 12, 0, 20)
+            text = "Save your college credentials once. Whenever you join ABES Wi-Fi, the app signs you in automatically."
+            textSize = 14f; setPadding(0, 8.dp, 0, 12.dp)
         })
         user = field("College username").also { root.addView(it) }
         pass = field("College password", true).also { root.addView(it) }
@@ -54,8 +56,8 @@ class MainActivity : Activity() {
             setOnClickListener { startActivity(Intent(this@MainActivity, PortalActivity::class.java)) }
         })
         root.addView(TextView(this).apply {
-            text = "Portal: ${Portal.URL}\n\nIf monitoring stops after a while, open Settings > Apps > ABES Wi-Fi Client > Battery and set it to Unrestricted."
-            textSize = 12f; setPadding(0, 20, 0, 0)
+            text = "Portal: ${Portal.URL}\n\nIf it stops working after a while, open Settings > Apps > ABES Wi-Fi Client: set Battery to Unrestricted and, on Xiaomi/Oppo/Vivo/Realme phones, turn on Autostart."
+            textSize = 12f; setPadding(0, 12.dp, 0, 0)
         })
         // targetSdk 35: Android 15 draws behind the status/nav bars; pad content clear of them.
         setContentView(ScrollView(this).apply { fitsSystemWindows = true; addView(root) })
@@ -88,6 +90,21 @@ class MainActivity : Activity() {
     private fun startMonitor() {
         WifiMonitorService.start(this, WifiMonitorService.ACTION_RETRY) // new credentials: try signing in now
         toast("Wi-Fi monitoring enabled")
+        askToRunInBackground()
     }
+
+    /**
+     * Many phones (Xiaomi, Oppo, Vivo, Samsung…) kill background apps to save battery, which would stop
+     * auto-login. Ask once to be exempt; some phones don't offer this screen, so fall back to the list.
+     */
+    @android.annotation.SuppressLint("BatteryLife") // sideloaded app; Play Store policy would need review
+    private fun askToRunInBackground() {
+        if ((getSystemService(POWER_SERVICE) as PowerManager).isIgnoringBatteryOptimizations(packageName)) return
+        val direct = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:$packageName"))
+        runCatching { startActivity(direct) }
+            .recoverCatching { startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)) }
+    }
+
+    private val Int.dp get() = (this * resources.displayMetrics.density).toInt()
     private fun toast(s: String) = Toast.makeText(this, s, Toast.LENGTH_LONG).show()
 }

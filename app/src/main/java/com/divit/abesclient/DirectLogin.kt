@@ -5,6 +5,7 @@ import android.net.Network
 import android.util.Log
 import java.net.URL
 import java.net.URLEncoder
+import java.security.cert.CertificateException
 import java.security.cert.X509Certificate
 import javax.net.ssl.HostnameVerifier
 import javax.net.ssl.HttpsURLConnection
@@ -16,7 +17,7 @@ import javax.net.ssl.X509TrustManager
  * PortalActivity (the WebView) stays as the fallback when this doesn't work.
  */
 object DirectLogin {
-    enum class Outcome { SIGNED_IN, WRONG_PASSWORD, FAILED }
+    enum class Outcome { SIGNED_IN, WRONG_PASSWORD, UNTRUSTED, FAILED }
     data class Result(val outcome: Outcome, val message: String)
 
     private const val TAG = "DirectLogin"
@@ -27,7 +28,8 @@ object DirectLogin {
             .also { Log.i(TAG, "Login result: ${it.outcome}") }
     } catch (e: Exception) {
         Log.w(TAG, "Login request failed: ${e.javaClass.simpleName}") // never log the body: it holds the password
-        Result(Outcome.FAILED, "couldn't reach the login page")
+        if (isUntrusted(e)) Result(Outcome.UNTRUSTED, "certificate mismatch")
+        else Result(Outcome.FAILED, "couldn't reach the login page")
     }
 
     /** Signs out over [network]. True when the portal confirms (it replies with status LOGIN). */
@@ -69,6 +71,11 @@ object DirectLogin {
         }
     }
 
+    /** The TLS handshake failed because the server isn't the pinned ABES portal: nothing was sent. */
+    private fun isUntrusted(e: Throwable) = generateSequence(e) { it.cause }.any { it is UntrustedPortal }
+
+    private class UntrustedPortal : CertificateException("Not the pinned ABES portal certificate")
+
     private fun tag(xml: String, name: String) =
         Regex("<$name>\\s*(?:<!\\[CDATA\\[)?(.*?)(?:]]>)?\\s*</$name>", RegexOption.DOT_MATCHES_ALL)
             .find(xml)?.groupValues?.get(1)?.trim() ?: ""
@@ -76,15 +83,17 @@ object DirectLogin {
     private fun form(vararg fields: Pair<String, String>) =
         fields.joinToString("&") { (k, v) -> "$k=${URLEncoder.encode(v, "UTF-8")}" }
 
-    // The portal's certificate is self-signed, so no normal check can pass. This accept-anything
-    // trust manager is attached only to the portal connections above (never installed globally),
-    // so every other HTTPS connection in the app keeps normal certificate checks.
-    // ponytail: trusts any cert at 192.168.1.254:8090; pin the cert on first login if spoofing matters.
-    @SuppressLint("CustomX509TrustManager", "TrustAllX509TrustManager")
+    // The portal's certificate is self-signed, so no CA check can pass. Instead this trust manager
+    // accepts exactly one key: the pinned ABES portal certificate (see PortalCert). The handshake fails
+    // before any form data is sent otherwise. It is attached only to the portal connections above
+    // (never installed globally), so every other HTTPS connection keeps normal certificate checks.
+    @SuppressLint("CustomX509TrustManager")
     private val portalOnlySsl: SSLContext = SSLContext.getInstance("TLS").apply {
         init(null, arrayOf(object : X509TrustManager {
-            override fun checkClientTrusted(chain: Array<X509Certificate>, authType: String) {}
-            override fun checkServerTrusted(chain: Array<X509Certificate>, authType: String) {}
+            override fun checkClientTrusted(chain: Array<X509Certificate>, authType: String) = throw CertificateException()
+            override fun checkServerTrusted(chain: Array<X509Certificate>, authType: String) {
+                if (!PortalCert.isPortal(chain.firstOrNull())) throw UntrustedPortal()
+            }
             override fun getAcceptedIssuers(): Array<X509Certificate> = emptyArray()
         }), null)
     }
