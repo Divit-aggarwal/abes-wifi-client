@@ -1,4 +1,4 @@
-# ABES Wi-Fi Client 1.0.0
+# ABES Wi-Fi 1.0.0
 
 Signs you in to the ABES Engineering College Wi-Fi (Sophos login page at
 `https://192.168.1.254:8090/httpclient.html`) automatically.
@@ -57,3 +57,10 @@ put it in `PortalCert.PIN`, update `app/src/test/resources/portal-leaf.pem`, and
 - Not tested: phone reboot; a session expiring on its own while connected (the app reacts when
   Android notices the Wi-Fi has lost internet, which can take a while).
 - `androidx.security-crypto` is deprecated by Google but still supported; migrate when it is removed.
+
+## Made by
+
+**Divit Aggarwal**, student developer at ABES Engineering College.
+[LinkedIn](https://www.linkedin.com/in/divit-aggarwal-/) · [GitHub](https://github.com/Divit-aggarwal)
+
+Found a bug or have an idea? [Open an issue](https://github.com/Divit-aggarwal/abes-wifi-client/issues/new).
