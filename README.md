@@ -38,4 +38,4 @@ Signs you in to the ABES Engineering College Wi-Fi (Sophos login page at
   other sites keep normal certificate checks. Because that certificate can't be verified, a fake
   Wi-Fi network that copies this address could receive your password. Pinning the certificate on
   first login would close that gap.
-- Monitoring doesn't restart after a phone reboot until you open the app once.
+- Monitoring doesn't restart after a phone reboot until you open the app and tap *Save* again.

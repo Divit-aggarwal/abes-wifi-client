@@ -52,6 +52,7 @@ class WifiMonitorService : Service() {
             if (!portalReachable(network)) {
                 setState("other", "Connected to a non-ABES Wi-Fi", false)
             } else if (c.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)) {
+                triedNetwork = null // online: if the session expires later on this connection, sign in again
                 setState("online", "ABES Wi-Fi: signed in and online", false)
             } else {
                 autoLogin(network)
