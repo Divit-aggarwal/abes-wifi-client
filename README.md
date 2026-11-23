@@ -31,9 +31,10 @@ Signs you in to the ABES Engineering College Wi-Fi (Sophos login page at
 
 ## Limitations
 
-- Builds and passes lint and unit tests, but has **not yet been tested on a phone or against the
-  live portal**. The direct login follows the usual Sophos `login.xml` format; if the reply looks
-  different, the notification shows the portal's message and the tap-to-open fallback still works.
+- Tested on a Vivo V2253 (Android 15) on ABES Wi-Fi: the app starts, monitoring runs, and the
+  login page fallback signs in. The `login.xml` request format and the wrong-password reply were
+  checked against the live portal. The direct login itself has **not yet run on the phone**, because
+  it was already signed in; check it with `adb logcat -s DirectLogin` (look for `Login result:`).
 - The portal uses a self-signed certificate, which is accepted only for `192.168.1.254:8090`; all
   other sites keep normal certificate checks. Because that certificate can't be verified, a fake
   Wi-Fi network that copies this address could receive your password. Pinning the certificate on
