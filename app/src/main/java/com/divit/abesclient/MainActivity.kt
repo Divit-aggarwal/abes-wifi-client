@@ -48,7 +48,8 @@ class MainActivity : Activity() {
             text = "Portal: ${Portal.URL}\n\nIf monitoring stops after a while, open Settings > Apps > ABES Wi-Fi Client > Battery and set it to Unrestricted."
             textSize = 12f; setPadding(0, 20, 0, 0)
         })
-        setContentView(ScrollView(this).apply { addView(root) })
+        // targetSdk 35: Android 15 draws behind the status/nav bars; pad content clear of them.
+        setContentView(ScrollView(this).apply { fitsSystemWindows = true; addView(root) })
     }
 
     override fun onNewIntent(intent: Intent) {

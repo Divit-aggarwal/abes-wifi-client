@@ -20,7 +20,7 @@ class PortalActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        val layout = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        val layout = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; fitsSystemWindows = true }
         val status = TextView(this).apply { text = "Opening ABES login portal…"; setPadding(16, 12, 16, 12) }
         web = WebView(this).apply {
             settings.javaScriptEnabled = true

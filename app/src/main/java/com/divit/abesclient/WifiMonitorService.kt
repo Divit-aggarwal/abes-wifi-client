@@ -3,7 +3,6 @@ package com.divit.abesclient
 import android.app.*
 import android.content.*
 import android.net.*
-import android.os.Build
 import androidx.core.app.NotificationCompat
 import java.net.InetSocketAddress
 import java.util.concurrent.Executors
@@ -82,10 +81,8 @@ class WifiMonitorService : Service() {
     }
 
     private fun createChannel() {
-        if (Build.VERSION.SDK_INT >= 26) {
-            val channel = NotificationChannel(channelId, "ABES Wi-Fi status", NotificationManager.IMPORTANCE_DEFAULT)
-            (getSystemService(NOTIFICATION_SERVICE) as NotificationManager).createNotificationChannel(channel)
-        }
+        val channel = NotificationChannel(channelId, "ABES Wi-Fi status", NotificationManager.IMPORTANCE_DEFAULT)
+        (getSystemService(NOTIFICATION_SERVICE) as NotificationManager).createNotificationChannel(channel)
     }
 
     override fun onBind(intent: Intent?) = null
