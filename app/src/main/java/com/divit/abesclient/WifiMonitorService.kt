@@ -20,6 +20,7 @@ class WifiMonitorService : Service() {
     private val channelId = "abes_wifi_status"
     private val io = Executors.newSingleThreadExecutor()
     @Volatile private var lastState = ""
+    @Volatile private var current: Notification? = null // what the status notification shows now
     @Volatile private var wifi: Network? = null         // the current Wi-Fi connection, if any
     @Volatile private var triedNetwork: Network? = null // auto-login already attempted on this connection
     @Volatile private var signedOut: Network? = null    // user signed out: stay out until the next connection
@@ -43,13 +44,17 @@ class WifiMonitorService : Service() {
     override fun onCreate() {
         super.onCreate()
         createChannel()
-        startForeground(NOTIF_ID, notification("Waiting for ABES Wi-Fi", false))
+        current = notification("Waiting for ABES Wi-Fi", false)
+        startForeground(NOTIF_ID, current!!)
         cm = getSystemService(CONNECTIVITY_SERVICE) as ConnectivityManager
         val request = NetworkRequest.Builder().addTransportType(NetworkCapabilities.TRANSPORT_WIFI).build()
         cm.registerNetworkCallback(request, callback)
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        // Every startForegroundService() call must be answered with startForeground(), even when the
+        // service is already running, or Android kills the app (seen on Android 15 after tapping Save).
+        startForeground(NOTIF_ID, current ?: notification("Waiting for ABES Wi-Fi", false))
         when (intent?.action) {
             ACTION_SIGN_OUT -> io.execute { signOut() }
             // New credentials saved, or signed in via the login page: re-check and allow one fresh attempt now.
@@ -144,7 +149,8 @@ class WifiMonitorService : Service() {
     private fun setState(state: String, message: String, open: Boolean) {
         if (state == lastState) return
         lastState = state
-        (getSystemService(NOTIFICATION_SERVICE) as NotificationManager).notify(NOTIF_ID, notification(message, open))
+        val n = notification(message, open).also { current = it }
+        (getSystemService(NOTIFICATION_SERVICE) as NotificationManager).notify(NOTIF_ID, n)
     }
 
     private fun notification(message: String, open: Boolean): Notification {
