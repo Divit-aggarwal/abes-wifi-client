@@ -34,8 +34,20 @@ class PortalActivity : Activity() {
                     else { handler.cancel(); status.text = "Blocked an untrusted certificate from ${uri.host}" }
                 }
 
+                // The portal only navigates away from itself after a successful login (to the page you
+                // originally wanted, often plain-http google.com). Treat that as "signed in" and close.
+                override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
+                    if (request.url.host == Portal.HOST) return false
+                    if (submitted) {
+                        Toast.makeText(this@PortalActivity, "Signed in to ABES Wi-Fi", Toast.LENGTH_SHORT).show()
+                        WifiMonitorService.start(this@PortalActivity, WifiMonitorService.ACTION_RETRY) // refresh status
+                        finish()
+                    }
+                    return true
+                }
+
                 override fun onReceivedError(view: WebView, request: WebResourceRequest, error: WebResourceError) {
-                    if (request.isForMainFrame) status.text = "Portal not reachable (${error.description}). Are you on ABES Wi-Fi?"
+                    if (request.isForMainFrame && request.url.host == Portal.HOST) status.text = "Portal not reachable (${error.description}). Are you on ABES Wi-Fi?"
                 }
 
                 override fun onPageFinished(view: WebView, url: String) {

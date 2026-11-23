@@ -31,6 +31,7 @@ class MainActivity : Activity() {
         user = field("College username").also { root.addView(it) }
         pass = field("College password", true).also { root.addView(it) }
         user.setText(SecurePrefs.username(this)); pass.setText(SecurePrefs.password(this))
+        if (user.text.isNotEmpty()) WifiMonitorService.start(this) // keep monitoring running whenever the app is opened
         root.addView(Button(this).apply {
             text = "Save credentials & enable monitoring"
             setOnClickListener {
@@ -38,6 +39,14 @@ class MainActivity : Activity() {
                 SecurePrefs.save(this@MainActivity, user.text.toString().trim(), pass.text.toString())
                 requestPermissionsIfNeeded()
                 toast("Credentials saved on this device")
+            }
+        })
+        root.addView(Button(this).apply {
+            text = "Sign out of ABES Wi-Fi"
+            setOnClickListener {
+                if (SecurePrefs.username(this@MainActivity).isEmpty()) { toast("Save your credentials first"); return@setOnClickListener }
+                WifiMonitorService.start(this@MainActivity, WifiMonitorService.ACTION_SIGN_OUT)
+                toast("Signing out… check the notification")
             }
         })
         root.addView(Button(this).apply {
@@ -77,7 +86,7 @@ class MainActivity : Activity() {
         startMonitor()
     }
     private fun startMonitor() {
-        ContextCompat.startForegroundService(this, Intent(this, WifiMonitorService::class.java))
+        WifiMonitorService.start(this, WifiMonitorService.ACTION_RETRY) // new credentials: try signing in now
         toast("Wi-Fi monitoring enabled")
     }
     private fun toast(s: String) = Toast.makeText(this, s, Toast.LENGTH_LONG).show()

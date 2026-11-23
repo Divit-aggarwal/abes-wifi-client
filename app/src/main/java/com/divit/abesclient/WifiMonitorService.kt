@@ -4,6 +4,7 @@ import android.app.*
 import android.content.*
 import android.net.*
 import androidx.core.app.NotificationCompat
+import androidx.core.content.ContextCompat
 import java.net.InetSocketAddress
 import java.util.concurrent.Executors
 
@@ -11,19 +12,28 @@ import java.util.concurrent.Executors
  * Detects the ABES network by checking whether the portal host is reachable on the Wi-Fi network,
  * instead of reading the SSID. Since Android 12, apps running in the background get the SSID as
  * "<unknown ssid>" unless they hold background location, so SSID matching silently never fired.
+ *
+ * All checks and portal requests run one at a time on [io], so they never race each other.
  */
 class WifiMonitorService : Service() {
     private lateinit var cm: ConnectivityManager
     private val channelId = "abes_wifi_status"
     private val io = Executors.newSingleThreadExecutor()
     @Volatile private var lastState = ""
-    @Volatile private var triedNetwork: Network? = null
+    @Volatile private var wifi: Network? = null         // the current Wi-Fi connection, if any
+    @Volatile private var triedNetwork: Network? = null // auto-login already attempted on this connection
+    @Volatile private var signedOut: Network? = null    // user signed out: stay out until the next connection
 
     private val callback = object : ConnectivityManager.NetworkCallback() {
-        override fun onAvailable(network: Network) = check(network)
+        override fun onAvailable(network: Network) {
+            wifi = network
+            check(network)
+        }
         override fun onCapabilitiesChanged(network: Network, caps: NetworkCapabilities) = check(network, caps)
         override fun onLost(network: Network) {
+            if (wifi == network) wifi = null
             triedNetwork = null
+            signedOut = null
             setState("lost", "Wi-Fi disconnected", false)
         }
     }
@@ -37,7 +47,22 @@ class WifiMonitorService : Service() {
         cm.registerNetworkCallback(request, callback)
     }
 
-    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int) = START_STICKY
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        when (intent?.action) {
+            ACTION_SIGN_OUT -> io.execute { signOut() }
+            // New credentials saved, or signed in via the login page: re-check and allow one fresh attempt now.
+            ACTION_RETRY -> io.execute {
+                triedNetwork = null
+                signedOut = null
+                lastState = ""
+                wifi?.let {
+                    cm.reportNetworkConnectivity(it, true) // ask Android to re-check internet now
+                    check(it)
+                }
+            }
+        }
+        return START_STICKY
+    }
 
     override fun onDestroy() {
         runCatching { cm.unregisterNetworkCallback(callback) }
@@ -49,6 +74,7 @@ class WifiMonitorService : Service() {
         io.execute {
             val c = caps ?: cm.getNetworkCapabilities(network) ?: return@execute
             if (!c.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)) return@execute
+            if (network == signedOut) return@execute // keep showing "Signed out"
             if (!portalReachable(network)) {
                 setState("other", "Connected to a non-ABES Wi-Fi", false)
             } else if (c.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)) {
@@ -68,6 +94,7 @@ class WifiMonitorService : Service() {
         // onCapabilitiesChanged fires often (e.g. signal strength). Retrying a wrong password could lock the account.
         if (triedNetwork == network) return
         triedNetwork = network
+        setState("signing_in", "Signing in to ABES Wi-Fi…", false)
         val result = DirectLogin.login(network, user, pass)
         when (result.outcome) {
             DirectLogin.Outcome.SIGNED_IN -> {
@@ -75,9 +102,21 @@ class WifiMonitorService : Service() {
                 cm.reportNetworkConnectivity(network, true) // ask Android to re-check internet now
             }
             DirectLogin.Outcome.WRONG_PASSWORD ->
-                setState("wrong_password", "Wrong username or password. Tap to open the login page.", true)
+                setState("wrong_password", "Wrong username or password. Open the app to fix it, or tap to open the login page.", true)
             DirectLogin.Outcome.FAILED ->
                 setState("failed", "Automatic sign-in failed (${result.message}). Tap to open the login page.", true)
+        }
+    }
+
+    private fun signOut() {
+        val network = wifi
+        if (network == null || !portalReachable(network)) return setState("signout_failed", "Not connected to ABES Wi-Fi", false)
+        if (DirectLogin.logout(network, SecurePrefs.username(this))) {
+            signedOut = network
+            setState("signed_out", "Signed out of ABES Wi-Fi. You'll be signed in again next time you connect.", false)
+            cm.reportNetworkConnectivity(network, false) // let Android notice there's no internet now
+        } else {
+            setState("signout_failed", "Sign-out failed. Tap to open the login page.", true)
         }
     }
 
@@ -100,7 +139,7 @@ class WifiMonitorService : Service() {
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
         val pending = PendingIntent.getActivity(this, 1, intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
         return NotificationCompat.Builder(this, channelId)
-            .setSmallIcon(android.R.drawable.stat_notify_sync)
+            .setSmallIcon(R.drawable.ic_wifi)
             .setContentTitle("ABES Wi-Fi Client").setContentText(message)
             .setStyle(NotificationCompat.BigTextStyle().bigText(message))
             .setContentIntent(pending).setOngoing(true).setOnlyAlertOnce(!open)
@@ -114,5 +153,20 @@ class WifiMonitorService : Service() {
 
     override fun onBind(intent: Intent?) = null
 
-    companion object { private const val NOTIF_ID = 41 }
+    companion object {
+        private const val NOTIF_ID = 41
+        const val ACTION_SIGN_OUT = "com.divit.abesclient.SIGN_OUT"
+        const val ACTION_RETRY = "com.divit.abesclient.RETRY"
+
+        fun start(context: Context, action: String? = null) =
+            ContextCompat.startForegroundService(context, Intent(context, WifiMonitorService::class.java).setAction(action))
+    }
+}
+
+/** Restarts monitoring after a reboot or an app update, if credentials are saved. */
+class BootReceiver : BroadcastReceiver() {
+    override fun onReceive(context: Context, intent: Intent) {
+        if (intent.action != Intent.ACTION_BOOT_COMPLETED && intent.action != Intent.ACTION_MY_PACKAGE_REPLACED) return
+        if (SecurePrefs.username(context).isNotEmpty()) WifiMonitorService.start(context)
+    }
 }
