@@ -16,7 +16,8 @@ Signs you in to the ABES Engineering College Wi-Fi (Sophos login page at
 4. **Fallback:** tap the notification to open the login page in the app; it fills in and submits
    the form for you (fields `username`, `password`, `loginbutton`) and closes once you're signed in.
 5. **Sign out** from the app. You stay signed out until the next time you connect to ABES Wi-Fi.
-6. Monitoring starts whenever you open the app, and restarts by itself after a reboot or app update.
+6. Monitoring starts whenever you open the app, and restarts by itself after an app update and
+   (untested) after a reboot.
 
 ## Build
 
