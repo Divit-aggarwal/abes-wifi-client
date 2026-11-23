@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The encrypted credentials can't be decrypted on another phone (the key stays in this phone's
+     Keystore), so copying them would crash the app on the new phone. Keep them out of backups. -->
+<data-extraction-rules>
+    <cloud-backup><exclude domain="sharedpref" path="." /></cloud-backup>
+    <device-transfer><exclude domain="sharedpref" path="." /></device-transfer>
+</data-extraction-rules>
