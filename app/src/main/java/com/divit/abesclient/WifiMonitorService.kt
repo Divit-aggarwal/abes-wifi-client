@@ -17,11 +17,15 @@ class WifiMonitorService : Service() {
     private val channelId = "abes_wifi_status"
     private val io = Executors.newSingleThreadExecutor()
     @Volatile private var lastState = ""
+    @Volatile private var triedNetwork: Network? = null
 
     private val callback = object : ConnectivityManager.NetworkCallback() {
         override fun onAvailable(network: Network) = check(network)
         override fun onCapabilitiesChanged(network: Network, caps: NetworkCapabilities) = check(network, caps)
-        override fun onLost(network: Network) = setState("lost", "Wi-Fi disconnected", false)
+        override fun onLost(network: Network) {
+            triedNetwork = null
+            setState("lost", "Wi-Fi disconnected", false)
+        }
     }
 
     override fun onCreate() {
@@ -50,8 +54,29 @@ class WifiMonitorService : Service() {
             } else if (c.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)) {
                 setState("online", "ABES Wi-Fi: signed in and online", false)
             } else {
-                setState("needs_login", "ABES Wi-Fi needs sign-in. Tap to log in.", true)
+                autoLogin(network)
             }
+        }
+    }
+
+    /** Tries the direct login once per Wi-Fi connection; the notification falls back to the login page. */
+    private fun autoLogin(network: Network) {
+        val user = SecurePrefs.username(this)
+        val pass = SecurePrefs.password(this)
+        if (user.isEmpty() || pass.isEmpty()) return setState("needs_login", "ABES Wi-Fi needs sign-in. Tap to log in.", true)
+        // onCapabilitiesChanged fires often (e.g. signal strength). Retrying a wrong password could lock the account.
+        if (triedNetwork == network) return
+        triedNetwork = network
+        val result = DirectLogin.login(network, user, pass)
+        when (result.outcome) {
+            DirectLogin.Outcome.SIGNED_IN -> {
+                setState("signed_in", "Signed in to ABES Wi-Fi", false)
+                cm.reportNetworkConnectivity(network, true) // ask Android to re-check internet now
+            }
+            DirectLogin.Outcome.WRONG_PASSWORD ->
+                setState("wrong_password", "Wrong username or password. Tap to open the login page.", true)
+            DirectLogin.Outcome.FAILED ->
+                setState("failed", "Automatic sign-in failed (${result.message}). Tap to open the login page.", true)
         }
     }
 
@@ -76,6 +101,7 @@ class WifiMonitorService : Service() {
         return NotificationCompat.Builder(this, channelId)
             .setSmallIcon(android.R.drawable.stat_notify_sync)
             .setContentTitle("ABES Wi-Fi Client").setContentText(message)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(message))
             .setContentIntent(pending).setOngoing(true).setOnlyAlertOnce(!open)
             .setPriority(if (open) NotificationCompat.PRIORITY_HIGH else NotificationCompat.PRIORITY_LOW).build()
     }
