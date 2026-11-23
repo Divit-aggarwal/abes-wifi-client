@@ -16,9 +16,10 @@
         android:allowBackup="false"
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:icon="@mipmap/ic_launcher"
-        android:label="ABES Wi-Fi Client"
+        android:label="ABES Wi-Fi"
         android:theme="@android:style/Theme.Material.Light.NoActionBar">
         <activity android:name=".PortalActivity" android:exported="false" />
+        <activity android:name=".AboutActivity" android:exported="false" />
         <activity android:name=".MainActivity" android:exported="true" android:launchMode="singleTop">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />

@@ -149,6 +149,7 @@ class WifiMonitorService : Service() {
     private fun setState(state: String, message: String, open: Boolean) {
         if (state == lastState) return
         lastState = state
+        MonitorStatus.publish(state, message)
         val n = notification(message, open).also { current = it }
         (getSystemService(NOTIFICATION_SERVICE) as NotificationManager).notify(NOTIF_ID, n)
     }
@@ -158,8 +159,8 @@ class WifiMonitorService : Service() {
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
         val pending = PendingIntent.getActivity(this, 1, intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
         return NotificationCompat.Builder(this, channelId)
-            .setSmallIcon(R.drawable.ic_wifi)
-            .setContentTitle("ABES Wi-Fi Client").setContentText(message)
+            .setSmallIcon(R.drawable.ic_wifi).setColor(0xFF1E5AA8.toInt())
+            .setContentTitle("ABES Wi-Fi").setContentText(message)
             .setStyle(NotificationCompat.BigTextStyle().bigText(message))
             .setContentIntent(pending).setOngoing(true).setOnlyAlertOnce(!open)
             .setPriority(if (open) NotificationCompat.PRIORITY_HIGH else NotificationCompat.PRIORITY_LOW).build()
@@ -180,6 +181,21 @@ class WifiMonitorService : Service() {
         fun start(context: Context, action: String? = null) =
             ContextCompat.startForegroundService(context, Intent(context, WifiMonitorService::class.java).setAction(action))
     }
+}
+
+/** The monitor's latest state, so the open app screen can show it live (same process). */
+object MonitorStatus {
+    @Volatile var state = ""; private set
+    @Volatile var message = ""; private set
+    private val main = android.os.Handler(android.os.Looper.getMainLooper())
+    private val listeners = java.util.concurrent.CopyOnWriteArraySet<() -> Unit>()
+
+    fun publish(state: String, message: String) {
+        this.state = state; this.message = message
+        main.post { listeners.forEach { it() } }
+    }
+    fun listen(l: () -> Unit) = listeners.add(l)
+    fun unlisten(l: () -> Unit) = listeners.remove(l)
 }
 
 /** Restarts monitoring after a reboot or an app update, if credentials are saved. */

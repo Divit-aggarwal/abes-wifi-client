@@ -6,6 +6,7 @@ import android.net.http.SslCertificate
 import android.net.http.SslError
 import android.os.Build
 import android.os.Bundle
+import android.view.View
 import android.view.ViewGroup
 import android.webkit.*
 import android.widget.*
@@ -44,11 +45,25 @@ class PortalActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        val ui = Ui(this).also { it.applyWindow(this) }
         val layout = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; fitsSystemWindows = true }
-        val status = TextView(this).apply { text = "Opening ABES login portal…"; val pad = (12 * resources.displayMetrics.density).toInt(); setPadding(pad, pad, pad, pad) }
+        val status = ui.label("Opening the ABES login page…", 14f, ui.muted).apply {
+            setPadding(ui.dp(20), 0, ui.dp(20), ui.dp(12))
+            accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE
+        }
+        val progress = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
+            max = 100; progressTintList = android.content.res.ColorStateList.valueOf(ui.brand)
+            progressBackgroundTintList = android.content.res.ColorStateList.valueOf(ui.outline)
+        }
         web = WebView(this).apply {
             settings.javaScriptEnabled = true
             settings.domStorageEnabled = true
+            webChromeClient = object : WebChromeClient() {
+                override fun onProgressChanged(view: WebView, newProgress: Int) {
+                    progress.progress = newProgress
+                    progress.visibility = if (newProgress >= 100) View.INVISIBLE else View.VISIBLE
+                }
+            }
             webViewClient = object : WebViewClient() {
                 // The campus firewall's certificate is self-signed, so the WebView always reports an error.
                 // Proceed ONLY for the portal address presenting the pinned ABES certificate.
@@ -58,6 +73,7 @@ class PortalActivity : Activity() {
                     if (isPortalAddress && PortalCert.isPortal(x509(error.certificate))) return handler.proceed()
                     handler.cancel()
                     blocked = true
+                    status.setTextColor(ui.red)
                     status.text = if (isPortalAddress) "This is not the real ABES login page (its security certificate doesn't match). Blocked to protect your password."
                         else "Blocked an untrusted certificate from ${uri.host}"
                 }
@@ -75,7 +91,10 @@ class PortalActivity : Activity() {
                 }
 
                 override fun onReceivedError(view: WebView, request: WebResourceRequest, error: WebResourceError) {
-                    if (request.isForMainFrame && request.url.host == Portal.HOST) status.text = "Portal not reachable (${error.description}). Are you on ABES Wi-Fi?"
+                    if (request.isForMainFrame && request.url.host == Portal.HOST) {
+                        status.text = "Can't reach the ABES login page. Are you connected to ABES Wi-Fi?"
+                        status.setTextColor(ui.amber)
+                    }
                 }
 
                 override fun onPageFinished(view: WebView, url: String) {
@@ -89,18 +108,20 @@ class PortalActivity : Activity() {
                         "if(!u||!p)return 'FIELDS_NOT_FOUND';u.value=$u;p.value=$p;" +
                         "var b=document.getElementById('loginbutton');if(b){b.click();return 'SUBMITTED';}return 'BUTTON_NOT_FOUND';})();"
                     evaluateJavascript(js) { result ->
-                        if (result?.contains("SUBMITTED") == true) submitted = true
+                        if (result?.contains("SUBMITTED") == true) { submitted = true; status.setTextColor(ui.brand) }
                         status.text = when {
-                            result?.contains("SUBMITTED") == true -> "Credentials submitted. Check the portal response below."
+                            result?.contains("SUBMITTED") == true -> "Signing you in with your saved details…"
                             result?.contains("FIELDS_NOT_FOUND") == true -> "Login fields not found on this page."
                             result?.contains("BUTTON_NOT_FOUND") == true -> "Filled your details, but no login button was found. Tap sign in yourself."
-                            else -> "Portal loaded. Sign in manually if needed."
+                            else -> "Sign in on the page below."
                         }
                     }
                 }
             }
         }
+        layout.addView(ui.topBar("ABES login page") { finish() })
         layout.addView(status)
+        layout.addView(progress, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ui.dp(3)))
         layout.addView(web, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
         setContentView(layout)
         web.loadUrl(Portal.URL)
