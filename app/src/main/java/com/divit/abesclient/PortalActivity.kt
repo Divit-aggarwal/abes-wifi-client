@@ -41,7 +41,8 @@ class PortalActivity : Activity() {
                 override fun onPageFinished(view: WebView, url: String) {
                     // onPageFinished can fire several times (redirects, reloads). Submit once only,
                     // otherwise a wrong password triggers an endless submit loop.
-                    if (submitted) return
+                    // After login the portal redirects (e.g. to Google). Only ever fill the portal's own page.
+                    if (submitted || Uri.parse(url).host != Portal.HOST) return
                     val u = org.json.JSONObject.quote(SecurePrefs.username(this@PortalActivity))
                     val p = org.json.JSONObject.quote(SecurePrefs.password(this@PortalActivity))
                     val js = "(function(){var u=document.getElementById('username');var p=document.getElementById('password');" +

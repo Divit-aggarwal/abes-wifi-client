@@ -38,7 +38,7 @@ object DirectLogin {
         )
         try {
             conn.outputStream.use { it.write(body.toByteArray()) }
-            parse(conn.inputStream.bufferedReader().use { it.readText() })
+            parse(conn.inputStream.bufferedReader().use { it.readText() }).also { Log.i(TAG, "Login result: ${it.outcome}") }
         } finally {
             conn.disconnect()
         }

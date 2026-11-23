@@ -16,5 +16,8 @@ class DirectLoginTest {
         assertEquals(Outcome.FAILED, limit.outcome)
         assertEquals("You have reached the maximum login limit.", limit.message)
         assertEquals(Outcome.FAILED, DirectLogin.parse("<html>not xml</html>").outcome)
+        // Captured from the real ABES portal (made-up username), 2026-11-23.
+        val real = "<?xml version='1.0' ?><requestresponse><status><![CDATA[LOGIN]]></status><message><![CDATA[Login failed. Invalid user name/password. Please contact the administrator. ]]></message><logoutmessage><![CDATA[You have successfully logged off]]></logoutmessage><state><![CDATA[]]></state><user><![CDATA[]]></user></requestresponse>"
+        assertEquals(Outcome.WRONG_PASSWORD, DirectLogin.parse(real).outcome)
     }
 }
