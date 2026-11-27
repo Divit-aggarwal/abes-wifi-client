@@ -1,0 +1,7 @@
+<resources>
+    <!-- Light: matches Ui.bg so there's no flash before the first frame. -->
+    <style name="AppTheme" parent="@android:style/Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">@color/app_bg</item>
+        <item name="android:colorAccent">#FF121417</item>
+    </style>
+</resources>

@@ -22,7 +22,7 @@ object Portal {
 }
 
 /**
- * The real ABES portal's certificate (Sophos "Appliance_Certificate_1SyA7o7oLpUKbPe", self-signed,
+ * The real campus portal's certificate (Sophos "Appliance_Certificate_1SyA7o7oLpUKbPe", self-signed,
  * valid until 2036). Anyone can run a Wi-Fi with a server at 192.168.1.254:8090, so the password is
  * only ever sent to a server presenting THIS key. If the college replaces the certificate, update
  * [PIN] with the output of:
@@ -47,13 +47,13 @@ class PortalActivity : Activity() {
         super.onCreate(savedInstanceState)
         val ui = Ui(this).also { it.applyWindow(this) }
         val layout = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; fitsSystemWindows = true }
-        val status = ui.label("Opening the ABES login page…", 14f, ui.muted).apply {
+        val status = ui.label("Opening the campus login page…", 13f, ui.muted).apply {
             setPadding(ui.dp(20), 0, ui.dp(20), ui.dp(12))
             accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE
         }
         val progress = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
-            max = 100; progressTintList = android.content.res.ColorStateList.valueOf(ui.brand)
-            progressBackgroundTintList = android.content.res.ColorStateList.valueOf(ui.outline)
+            max = 100; progressTintList = android.content.res.ColorStateList.valueOf(ui.ink)
+            progressBackgroundTintList = android.content.res.ColorStateList.valueOf(ui.line)
         }
         web = WebView(this).apply {
             settings.javaScriptEnabled = true
@@ -66,15 +66,15 @@ class PortalActivity : Activity() {
             }
             webViewClient = object : WebViewClient() {
                 // The campus firewall's certificate is self-signed, so the WebView always reports an error.
-                // Proceed ONLY for the portal address presenting the pinned ABES certificate.
+                // Proceed ONLY for the portal address presenting the pinned campus portal certificate.
                 override fun onReceivedSslError(view: WebView, handler: SslErrorHandler, error: SslError) {
                     val uri = Uri.parse(error.url)
                     val isPortalAddress = uri.host == Portal.HOST && uri.port == Portal.PORT
                     if (isPortalAddress && PortalCert.isPortal(x509(error.certificate))) return handler.proceed()
                     handler.cancel()
                     blocked = true
-                    status.setTextColor(ui.red.ink)
-                    status.text = if (isPortalAddress) "This is not the real ABES login page (its security certificate doesn't match). Blocked to protect your password."
+                    status.setTextColor(ui.bad.color)
+                    status.text = if (isPortalAddress) "This is not the real campus login page (its security certificate doesn't match). Blocked to protect your password."
                         else "Blocked an untrusted certificate from ${uri.host}"
                 }
 
@@ -83,7 +83,7 @@ class PortalActivity : Activity() {
                 override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
                     if (request.url.host == Portal.HOST) return false
                     if (submitted) {
-                        Toast.makeText(this@PortalActivity, "Signed in to ABES Wi-Fi", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(this@PortalActivity, "Signed in to campus Wi-Fi", Toast.LENGTH_SHORT).show()
                         WifiMonitorService.start(this@PortalActivity, WifiMonitorService.ACTION_RETRY) // refresh status
                         finish()
                     }
@@ -92,8 +92,8 @@ class PortalActivity : Activity() {
 
                 override fun onReceivedError(view: WebView, request: WebResourceRequest, error: WebResourceError) {
                     if (request.isForMainFrame && request.url.host == Portal.HOST) {
-                        status.text = "Can't reach the ABES login page. Are you connected to ABES Wi-Fi?"
-                        status.setTextColor(ui.amber.ink)
+                        status.text = "Can't reach the campus login page. Are you connected to campus Wi-Fi?"
+                        status.setTextColor(ui.warn.color)
                     }
                 }
 
@@ -108,7 +108,7 @@ class PortalActivity : Activity() {
                         "if(!u||!p)return 'FIELDS_NOT_FOUND';u.value=$u;p.value=$p;" +
                         "var b=document.getElementById('loginbutton');if(b){b.click();return 'SUBMITTED';}return 'BUTTON_NOT_FOUND';})();"
                     evaluateJavascript(js) { result ->
-                        if (result?.contains("SUBMITTED") == true) { submitted = true; status.setTextColor(ui.brand) }
+                        if (result?.contains("SUBMITTED") == true) { submitted = true; status.setTextColor(ui.ink) }
                         status.text = when {
                             result?.contains("SUBMITTED") == true -> "Signing you in with your saved details…"
                             result?.contains("FIELDS_NOT_FOUND") == true -> "Login fields not found on this page."
@@ -119,7 +119,7 @@ class PortalActivity : Activity() {
                 }
             }
         }
-        layout.addView(ui.topBar("ABES login page") { finish() })
+        layout.addView(ui.topBar("Login page") { finish() })
         layout.addView(status)
         layout.addView(progress, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ui.dp(3)))
         layout.addView(web, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))

@@ -2,15 +2,12 @@ package com.divit.abesclient
 
 import android.Manifest
 import android.animation.ObjectAnimator
-import android.animation.PropertyValuesHolder
 import android.animation.ValueAnimator
 import android.annotation.SuppressLint
 import android.app.Activity
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.content.res.ColorStateList
-import android.graphics.Color
-import android.graphics.drawable.RippleDrawable
+import android.graphics.drawable.GradientDrawable
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -28,24 +25,24 @@ import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import com.divit.abesclient.Ui.Style
 import com.divit.abesclient.Ui.Tone
+import com.divit.abesclient.SignalView.Mode
 
 class MainActivity : Activity() {
     private lateinit var ui: Ui
+    private lateinit var host: FrameLayout
     private lateinit var scroll: ScrollView
-    private lateinit var glowOuter: View
-    private lateinit var glowInner: View
-    private lateinit var core: FrameLayout
-    private lateinit var coreIcon: ImageView
-    private lateinit var coreSpinner: ProgressBar
-    private lateinit var chip: TextView
-    private lateinit var heroTitle: TextView
-    private lateinit var heroBody: TextView
-    private lateinit var heroActions: LinearLayout
+    private lateinit var statusCard: LinearLayout
+    private lateinit var statusFill: GradientDrawable
+    private lateinit var statusContent: LinearLayout
+    private lateinit var signal: SignalView
     private lateinit var accountCard: LinearLayout
     private lateinit var checksCard: LinearLayout
-    private var pulse: ObjectAnimator? = null
+    private var shownState: String? = null
+    private var shownTone: Tone? = null
     private var editing = false
-    private val onStatus: () -> Unit = { renderHero() }
+    private var lastChecks: Pair<Boolean, Boolean>? = null
+    private val running = mutableListOf<ValueAnimator>()
+    private val onStatus: () -> Unit = { renderStatus() }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -58,34 +55,44 @@ class MainActivity : Activity() {
 
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(ui.dp(20), ui.dp(8), ui.dp(20), ui.dp(36))
+            setPadding(ui.dp(20), ui.dp(4), ui.dp(20), ui.dp(40))
+            isFocusableInTouchMode = true // takes first focus, so the screen opens at the top, not at a field
         }
-        root.addView(header())
-        root.addView(buildHero())
-        root.addView(ui.sectionTitle("Account"))
-        accountCard = ui.card().also { root.addView(it) }
-        root.addView(ui.sectionTitle("Keep it working"))
-        checksCard = ui.card().apply { setPadding(ui.dp(8), ui.dp(8), ui.dp(8), ui.dp(8)) }.also { root.addView(it) }
-        root.addView(footer())
+        val head = header()
+        root.addView(head)
+        statusCard = buildStatusCard()
+        root.addView(statusCard)
+        accountCard = ui.card()
+        val account = group(ui.sectionTitle("Account"), accountCard)
+        root.addView(account)
+        checksCard = ui.card()
+        val checks = group(ui.sectionTitle("Keep it working"), checksCard, footer())
+        root.addView(checks)
         // targetSdk 35: Android 15 draws behind the status/nav bars; pad content clear of them.
         scroll = ScrollView(this).apply { fitsSystemWindows = true; isFillViewport = true; addView(root) }
-        setContentView(scroll)
+        host = FrameLayout(this).apply { addView(scroll) }
+        setContentView(host)
 
         renderAccount()
+        ui.enter(head, statusCard, account, checks)
         if (hasCredentials()) WifiMonitorService.start(this) // keep monitoring running whenever the app is opened
     }
 
     override fun onResume() {
         super.onResume()
         MonitorStatus.listen(onStatus)
-        renderHero()
+        renderStatus()
         renderChecks() // settings may have changed while we were away
     }
 
     override fun onPause() {
         MonitorStatus.unlisten(onStatus)
-        pulse?.pause()
         super.onPause()
+    }
+
+    override fun onDestroy() {
+        running.forEach { it.cancel() }
+        super.onDestroy()
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -93,122 +100,179 @@ class MainActivity : Activity() {
         if (intent.getBooleanExtra("open_portal", false)) openPortal()
     }
 
+    private fun group(vararg views: View) = LinearLayout(this).apply {
+        orientation = LinearLayout.VERTICAL
+        views.forEach { addView(it) }
+    }
+
     // ---------- Header ----------
 
     private fun header() = LinearLayout(this).apply {
         orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
-        setPadding(ui.dp(4), ui.dp(12), 0, 0)
-        addView(ui.label("ABES Wi-Fi", 24f, ui.text, 700), LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
-        addView(ImageView(this@MainActivity).apply { // About the developer
-            setImageResource(R.drawable.ic_info); imageTintList = ColorStateList.valueOf(ui.text)
-            setPadding(ui.dp(11), ui.dp(11), ui.dp(11), ui.dp(11))
-            background = RippleDrawable(ColorStateList.valueOf(ui.tint(ui.text, 0.12f)), ui.oval(ui.surface), null)
-            contentDescription = "About the developer"
-            setOnClickListener { startActivity(Intent(this@MainActivity, AboutActivity::class.java)) }
-        }, LinearLayout.LayoutParams(ui.dp(44), ui.dp(44)))
+        minimumHeight = ui.dp(56)
+        setPadding(ui.dp(4), 0, 0, 0)
+        addView(ui.label(getString(R.string.app_name), 20f, ui.ink, bold = true), LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
+        addView(ui.iconButton(R.drawable.ic_info, "About the app's makers") {
+            startActivity(Intent(this@MainActivity, AboutActivity::class.java))
+        }.apply { (layoutParams as LinearLayout.LayoutParams).marginEnd = -ui.dp(10) })
     }
 
-    // ---------- Status orb ----------
+    // ---------- Status card ----------
 
-    private class Hero(
-        val tone: Tone, val icon: Int, val chip: String, val title: String, val body: String, val busy: Boolean = false,
-        val actions: List<Triple<String, Style, () -> Unit>> = emptyList()
+    private class Status(
+        val tone: Tone, val signal: SignalView.Mode, val line: String, val title: String, val body: String,
+        val portal: String? = null, val busy: Boolean = false, val peak: Boolean = false,
+        val actions: List<Triple<String, Style, (Ui.Btn) -> Unit>> = emptyList()
     )
 
-    private fun buildHero() = LinearLayout(this).apply {
-        orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER_HORIZONTAL
-        setPadding(0, ui.dp(28), 0, ui.dp(4))
-        glowOuter = View(this@MainActivity)
-        glowInner = View(this@MainActivity)
-        coreIcon = ImageView(this@MainActivity).apply {
-            imageTintList = ColorStateList.valueOf(Color.WHITE)
-            importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
-        }
-        coreSpinner = ProgressBar(this@MainActivity).apply {
-            isIndeterminate = true; indeterminateTintList = ColorStateList.valueOf(Color.WHITE)
-        }
-        core = FrameLayout(this@MainActivity).apply {
-            elevation = ui.dp(10).toFloat()
-            addView(coreIcon, FrameLayout.LayoutParams(ui.dp(60), ui.dp(60), Gravity.CENTER))
-            addView(coreSpinner, FrameLayout.LayoutParams(ui.dp(64), ui.dp(64), Gravity.CENTER))
-        }
-        addView(FrameLayout(this@MainActivity).apply {
-            addView(glowOuter, FrameLayout.LayoutParams(ui.dp(232), ui.dp(232), Gravity.CENTER))
-            addView(glowInner, FrameLayout.LayoutParams(ui.dp(180), ui.dp(180), Gravity.CENTER))
-            addView(core, FrameLayout.LayoutParams(ui.dp(132), ui.dp(132), Gravity.CENTER))
-        }, LinearLayout.LayoutParams(ui.dp(232), ui.dp(232)))
-        pulse = ObjectAnimator.ofPropertyValuesHolder(glowOuter,
-            PropertyValuesHolder.ofFloat(View.SCALE_X, 0.86f, 1f),
-            PropertyValuesHolder.ofFloat(View.SCALE_Y, 0.86f, 1f),
-            PropertyValuesHolder.ofFloat(View.ALPHA, 1f, 0.35f)).apply {
-            duration = 1100; repeatCount = ValueAnimator.INFINITE; repeatMode = ValueAnimator.REVERSE
-        }
-        chip = ui.label("", 12f, ui.text, 700).apply {
-            letterSpacing = 0.12f; setPadding(ui.dp(14), ui.dp(6), ui.dp(14), ui.dp(6))
-        }
-        addView(chip, LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT).apply { topMargin = ui.dp(20) })
-        heroTitle = ui.label("", 28f, ui.text, 700).apply {
-            gravity = Gravity.CENTER; setPadding(0, ui.dp(12), 0, 0)
-            accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE // read out status changes
-        }
-        heroBody = ui.label("", 15f, ui.muted).apply { gravity = Gravity.CENTER; setPadding(ui.dp(16), ui.dp(8), ui.dp(16), 0) }
-        heroActions = LinearLayout(this@MainActivity).apply { orientation = LinearLayout.VERTICAL; setPadding(0, ui.dp(12), 0, 0) }
-        addView(heroTitle, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
-        addView(heroBody, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
-        addView(heroActions, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
+    private fun buildStatusCard() = LinearLayout(this).apply {
+        orientation = LinearLayout.VERTICAL
+        statusFill = ui.rounded(ui.surface, 24)
+        background = statusFill
+        setPadding(ui.dp(20), ui.dp(24), ui.dp(20), ui.dp(20))
+        layoutParams = LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { topMargin = ui.dp(8) }
+        signal = SignalView(this@MainActivity)
+        statusContent = LinearLayout(this@MainActivity).apply { orientation = LinearLayout.VERTICAL }
+        addView(statusContent)
     }
 
-    private fun currentHero(): Hero {
-        val usePage = Triple("Use the login page instead", Style.TEXT, ::openPortal)
-        val waiting = "You'll be signed in automatically as soon as you join ABES Wi-Fi."
-        if (!hasCredentials()) return Hero(ui.blue, R.drawable.ic_lock, "SET UP", "Sign in once",
-            "Save your ABES login below. After that, the app signs you in every time you join campus Wi-Fi.")
+    private fun currentStatus(): Status {
+        val usePage = Triple<String, Style, (Ui.Btn) -> Unit>("Use the login page instead", Style.QUIET) { openPortal() }
+        val waiting = "You'll be signed in automatically as soon as you join campus Wi-Fi."
+        val portal = "Portal ${Portal.HOST}"
+        if (!hasCredentials()) return Status(ui.idle, Mode.OFF, "Set up", "Sign in once",
+            "Save your college login below. After that, the app signs you in every time you join campus Wi-Fi.")
         return when (MonitorStatus.state) {
-            "online", "signed_in" -> Hero(ui.green, R.drawable.ic_check_circle, "CONNECTED", "You're online",
-                "Signed in to ABES Wi-Fi as ${SecurePrefs.username(this)}",
-                actions = listOf(Triple("Sign out", Style.TONAL, ::signOut)))
-            "signing_in" -> Hero(ui.blue, R.drawable.ic_wifi, "SIGNING IN", "Signing you in…",
-                "Talking to the ABES login page", busy = true)
-            "wrong_password" -> Hero(ui.amber, R.drawable.ic_error, "ACTION NEEDED", "Wrong password",
-                "The ABES login page didn't accept your username or password.",
-                actions = listOf(Triple("Update login details", Style.PRIMARY, ::startEditing), usePage))
+            "signed_in" -> Status(ui.ok, Mode.ON, "Connected", "You're online", "Signed in to campus Wi-Fi as ${SecurePrefs.username(this)}.",
+                portal = "$portal · certificate verified", peak = true,
+                actions = listOf(Triple("Sign out", Style.SECONDARY) { b -> b.busy("Signing out"); signOut() }))
+            "online" -> Status(ui.ok, Mode.ON, "Connected", "You're online", "Signed in to campus Wi-Fi as ${SecurePrefs.username(this)}.",
+                portal = portal, peak = true,
+                actions = listOf(Triple("Sign out", Style.SECONDARY) { b -> b.busy("Signing out"); signOut() }))
+            "signing_in" -> Status(ui.busy, Mode.SEARCHING, "Signing in", "Signing you in",
+                "Sending your saved login to the campus login portal.", portal = portal, busy = true)
+            "wrong_password" -> Status(ui.warn, Mode.BROKEN, "Action needed", "Wrong password",
+                "The campus portal didn't accept your college ID or password. The app won't try again until you update them.",
+                actions = listOf(Triple("Update login details", Style.PRIMARY) { _ -> startEditing() }, usePage))
             "failed", "needs_login" -> {
                 val detail = MonitorStatus.message.substringAfter("failed (", "").substringBefore(")")
-                Hero(ui.amber, R.drawable.ic_error, "ACTION NEEDED", "Couldn't sign you in",
+                Status(ui.warn, Mode.BROKEN, "Action needed", "Couldn't sign you in",
                     if (detail.isNotBlank()) "The login page said: ${detail.replaceFirstChar { it.uppercase() }}." else "The login page didn't respond as expected.",
-                    actions = listOf(Triple("Try again", Style.PRIMARY, ::retry), usePage))
+                    actions = listOf(Triple("Try again", Style.PRIMARY) { b -> b.busy("Starting"); retry() }, usePage))
             }
-            "signout_failed" -> Hero(ui.amber, R.drawable.ic_error, "ACTION NEEDED", "Couldn't sign out",
-                "Make sure you're connected to ABES Wi-Fi, then try again.",
-                actions = listOf(Triple("Try again", Style.PRIMARY, ::signOut)))
-            "untrusted" -> Hero(ui.red, R.drawable.ic_shield, "BLOCKED", "Fake login page",
-                "This Wi-Fi is imitating the ABES login page, so your password was not sent.")
-            "signed_out" -> Hero(ui.gray, R.drawable.ic_logout, "SIGNED OUT", "You're signed out",
+            "signout_failed" -> Status(ui.warn, Mode.BROKEN, "Action needed", "Couldn't sign out",
+                "Make sure you're connected to campus Wi-Fi, then try again.",
+                actions = listOf(Triple("Try again", Style.PRIMARY) { b -> b.busy("Signing out"); signOut() }))
+            "untrusted" -> Status(ui.bad, Mode.BROKEN, "Blocked", "Fake login page",
+                "This network answers at the campus portal's address, but its security certificate doesn't match. Your password was not sent.",
+                portal = "Certificate mismatch at ${Portal.HOST}")
+            "signed_out" -> Status(ui.idle, Mode.OFF, "Signed out", "You're signed out",
                 "You'll be signed in again the next time you connect.",
-                actions = listOf(Triple("Sign in now", Style.PRIMARY, ::retry)))
-            "other" -> Hero(ui.gray, R.drawable.ic_wifi, "NOT ON CAMPUS", "Not on ABES Wi-Fi", waiting)
-            "lost" -> Hero(ui.gray, R.drawable.ic_wifi, "OFFLINE", "Wi-Fi is off", waiting)
-            else -> Hero(ui.gray, R.drawable.ic_wifi, "WAITING", "Looking for ABES Wi-Fi", waiting)
+                actions = listOf(Triple("Sign in now", Style.PRIMARY) { b -> b.busy("Starting"); retry() }))
+            "other" -> Status(ui.idle, Mode.OFF, "Waiting", "Not on campus Wi-Fi", waiting)
+            "lost" -> Status(ui.idle, Mode.OFF, "Offline", "Wi-Fi is off", waiting)
+            else -> Status(ui.idle, Mode.SEARCHING, "Waiting", "Looking for campus Wi-Fi", waiting)
         }
     }
 
-    private fun renderHero() {
-        val h = currentHero()
-        glowOuter.background = ui.oval(ui.tint(h.tone.light, if (ui.dark) 0.10f else 0.14f))
-        glowInner.background = ui.oval(ui.tint(h.tone.light, if (ui.dark) 0.18f else 0.22f))
-        core.background = ui.gradient(h.tone.light, h.tone.deep, oval = true)
-        coreIcon.setImageResource(h.icon)
-        coreIcon.visibility = if (h.busy) View.INVISIBLE else View.VISIBLE
-        coreSpinner.visibility = if (h.busy) View.VISIBLE else View.GONE
-        if (h.busy) { if (pulse?.isStarted == true) pulse?.resume() else pulse?.start() }
-        else { pulse?.cancel(); glowOuter.scaleX = 1f; glowOuter.scaleY = 1f; glowOuter.alpha = 1f }
-        chip.text = h.chip
-        chip.setTextColor(h.tone.ink)
-        chip.background = ui.rounded(ui.tint(h.tone.light, 0.16f), 999)
-        heroTitle.text = h.title
-        heroBody.text = h.body
-        heroActions.removeAllViews()
-        h.actions.forEach { (text, style, action) -> heroActions.addView(ui.button(text, style) { action() }) }
+    /** Redraws the status card. A change of state cross-fades the card's tint and swaps the text. */
+    private fun renderStatus() {
+        val s = currentStatus()
+        val key = s.title + s.body + s.actions.size
+        val first = shownState == null
+        if (key == shownState) return
+        val previous = shownState
+        shownState = key
+
+        val target = ui.mix(s.tone.color, ui.surface, if (ui.dark) 0.12f else 0.09f)
+        val from = shownTone?.let { ui.mix(it.color, ui.surface, if (ui.dark) 0.12f else 0.09f) } ?: target
+        if (first) statusFill.setColor(target) else ui.fadeFill(statusFill, from, target)
+        shownTone = s.tone
+        signal.color = s.tone.color
+        signal.show(s.signal, animate = !first)
+
+        if (first) fillStatus(s) else ui.swap(statusContent) { fillStatus(s) }
+        // a small confirmation when the user's own action (or a sign-in) finishes while they watch
+        if (previous != null) when (MonitorStatus.state) {
+            "signed_in" -> ui.toast(host, "Signed in to campus Wi-Fi")
+            "signed_out" -> ui.toast(host, "Signed out of campus Wi-Fi", R.drawable.ic_logout)
+        }
+    }
+
+    private fun fillStatus(s: Status) {
+        running.forEach { it.cancel() }; running.clear()
+        statusContent.removeAllViews()
+        (signal.parent as? android.view.ViewGroup)?.removeView(signal)
+        statusContent.addView(LinearLayout(this).apply { // status tag on the left, the signal on the right
+            orientation = LinearLayout.HORIZONTAL
+            addView(statusTag(s), LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT).apply { gravity = Gravity.TOP })
+            addView(Space(this@MainActivity), LinearLayout.LayoutParams(0, 0, 1f))
+            addView(signal, LinearLayout.LayoutParams(ui.dp(72), ui.dp(72)).apply { marginStart = ui.dp(16) })
+        })
+        statusContent.addView(ui.label(s.title, 32f, ui.ink, bold = true).apply {
+            setPadding(0, ui.dp(12), 0, 0)
+            accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE // read out status changes
+        })
+        statusContent.addView(ui.label(s.body, 16f, ui.muted).apply { setPadding(0, ui.dp(8), 0, 0) })
+        if (s.busy) statusContent.addView(progressLine(s.tone))
+        s.portal?.let { p ->
+            statusContent.addView(LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
+                setPadding(0, ui.dp(16), 0, 0)
+                addView(ui.icon(R.drawable.ic_lock, ui.muted, 14))
+                addView(ui.label(p, 13f, ui.muted).apply { setPadding(ui.dp(6), 0, 0, 0) })
+            })
+        }
+        if (s.actions.isNotEmpty()) statusContent.addView(LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(0, ui.dp(24), 0, 0)
+            s.actions.forEachIndexed { i, (text, style, action) ->
+                addView(ui.button(text, style) { action(it) }.apply {
+                    if (i > 0) (layoutParams as LinearLayout.LayoutParams).topMargin = ui.dp(8)
+                })
+            }
+        })
+    }
+
+    /** "Connected" with a dot (or a check that draws in when you come online), on a soft tint. */
+    private fun statusTag(s: Status) = LinearLayout(this).apply {
+        orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
+        background = ui.rounded(ui.tint(s.tone.color, if (ui.dark) 0.18f else 0.12f), 8)
+        setPadding(ui.dp(10), ui.dp(6), ui.dp(10), ui.dp(6))
+        val mark = FrameLayout(this@MainActivity)
+        if (s.peak) {
+            val ring = View(this@MainActivity).apply { background = ui.oval(android.graphics.Color.TRANSPARENT, s.tone.color, 2f); alpha = 0f }
+            val check = ui.icon(R.drawable.ic_check, s.tone.color, 14).apply { scaleX = 0.4f; scaleY = 0.4f; alpha = 0f }
+            mark.addView(ring, FrameLayout.LayoutParams(ui.dp(14), ui.dp(14), Gravity.CENTER))
+            mark.addView(check, FrameLayout.LayoutParams(ui.dp(14), ui.dp(14), Gravity.CENTER))
+            check.animate().scaleX(1f).scaleY(1f).alpha(1f).setStartDelay(150).setDuration(450).setInterpolator(ui.ease).start()
+            ring.scaleX = 0.6f; ring.scaleY = 0.6f; ring.alpha = 0.6f
+            ring.animate().scaleX(1.9f).scaleY(1.9f).alpha(0f).setStartDelay(100).setDuration(800).setInterpolator(ui.ease).start()
+        } else {
+            val dot = View(this@MainActivity).apply { background = ui.oval(s.tone.color) }
+            mark.addView(dot, FrameLayout.LayoutParams(ui.dp(8), ui.dp(8), Gravity.CENTER))
+            if (s.busy) running += ObjectAnimator.ofFloat(dot, View.ALPHA, 1f, 0.25f).apply {
+                duration = 500; repeatCount = ValueAnimator.INFINITE; repeatMode = ValueAnimator.REVERSE; start()
+            }
+        }
+        addView(mark, LinearLayout.LayoutParams(ui.dp(14), ui.dp(14)).apply { marginEnd = ui.dp(8) })
+        addView(ui.label(s.line, 13f, s.tone.color, bold = true))
+    }
+
+    /** A thin bar with a segment sliding across, while signing in. */
+    private fun progressLine(tone: Tone) = FrameLayout(this).apply {
+        background = ui.rounded(ui.tint(tone.color, 0.2f), 2)
+        clipToOutline = true
+        layoutParams = LinearLayout.LayoutParams(MATCH_PARENT, ui.dp(3)).apply { topMargin = ui.dp(16) }
+        val seg = View(this@MainActivity).apply { background = ui.rounded(tone.color, 2) }
+        addView(seg, FrameLayout.LayoutParams(0, MATCH_PARENT))
+        post {
+            val w = width.toFloat()
+            seg.layoutParams.width = (w * 0.35f).toInt(); seg.requestLayout()
+            running += ObjectAnimator.ofFloat(seg, View.TRANSLATION_X, -w * 0.35f, w).apply {
+                duration = 1200; repeatCount = ValueAnimator.INFINITE; interpolator = ui.ease; start()
+            }
+        }
     }
 
     // ---------- Account ----------
@@ -216,116 +280,131 @@ class MainActivity : Activity() {
     private fun renderAccount() {
         accountCard.removeAllViews()
         if (!editing) {
-            accountCard.setPadding(ui.dp(16), ui.dp(16), ui.dp(12), ui.dp(16))
-            accountCard.addView(LinearLayout(this).apply {
-                orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
-                addView(ui.iconTile(R.drawable.ic_lock, ui.blue, 44))
-                addView(LinearLayout(this@MainActivity).apply {
-                    orientation = LinearLayout.VERTICAL; setPadding(ui.dp(14), 0, ui.dp(8), 0)
-                    addView(ui.label(SecurePrefs.username(this@MainActivity), 17f, ui.text, 500))
-                    addView(ui.label("Password saved securely", 13f, ui.muted))
-                }, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
-                addView(ui.label("Change", 15f, ui.brand, 500).apply {
-                    setPadding(ui.dp(14), ui.dp(10), ui.dp(14), ui.dp(10))
-                    background = RippleDrawable(ColorStateList.valueOf(ui.tint(ui.brand, 0.15f)), null, ui.rounded(Color.BLACK, 999))
-                    setOnClickListener { startEditing() }
-                })
-            })
+            accountCard.addView(ui.row(R.drawable.ic_lock, SecurePrefs.username(this), "Password saved on this phone",
+                trailing = ui.textButton("Change") { startEditing() }, onClick = null))
             return
         }
-        accountCard.setPadding(ui.dp(20), ui.dp(20), ui.dp(20), ui.dp(16))
         val firstTime = !hasCredentials()
-        accountCard.addView(ui.label(if (firstTime) "Your ABES login" else "Update login details", 18f, ui.text, 700))
-        accountCard.addView(ui.label("Same username and password as the campus Wi-Fi page.", 14f, ui.muted)
+        val form = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(ui.dp(16), ui.dp(24), ui.dp(16), ui.dp(16))
+        }
+        form.addView(ui.label(if (firstTime) "Your college login" else "Update login details", 20f, ui.ink, bold = true))
+        form.addView(ui.label("The same college ID and password you type on the campus Wi-Fi page.", 13f, ui.muted)
             .apply { setPadding(0, ui.dp(4), 0, ui.dp(4)) })
         val user = ui.field("College ID").apply { setText(SecurePrefs.username(this@MainActivity)) }
-        val pass = ui.field("Password", secret = true).apply {
-            setText(SecurePrefs.password(this@MainActivity))
-            setPadding(ui.dp(18), ui.dp(16), ui.dp(76), ui.dp(16))
-            layoutParams = FrameLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT)
-        }
-        val toggle = ui.label("Show", 14f, ui.brand, 500).apply {
-            setPadding(ui.dp(16), ui.dp(12), ui.dp(18), ui.dp(12))
+        val pass = ui.field("Password", secret = true).apply { setText(SecurePrefs.password(this@MainActivity)) }
+        val userErr = errorLabel(); val passErr = errorLabel()
+        val eye = ImageView(this).apply {
+            setImageResource(R.drawable.ic_eye); imageTintList = android.content.res.ColorStateList.valueOf(ui.muted)
+            setPadding(ui.dp(12), ui.dp(12), ui.dp(12), ui.dp(12))
+            background = ui.ripple(null, 10)
             contentDescription = "Show password"
             setOnClickListener {
                 val hidden = pass.inputType and InputType.TYPE_TEXT_VARIATION_PASSWORD == InputType.TYPE_TEXT_VARIATION_PASSWORD
                 pass.inputType = InputType.TYPE_CLASS_TEXT or
                     (if (hidden) InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD else InputType.TYPE_TEXT_VARIATION_PASSWORD)
-                pass.typeface = android.graphics.Typeface.create("sans-serif", android.graphics.Typeface.NORMAL)
+                pass.typeface = ui.regular
                 pass.setSelection(pass.text.length)
-                text = if (hidden) "Hide" else "Show"
                 contentDescription = if (hidden) "Hide password" else "Show password"
+                animate().alpha(0f).setDuration(90).withEndAction { // the icon swaps with a quick fade
+                    setImageResource(if (hidden) R.drawable.ic_eye_off else R.drawable.ic_eye)
+                    animate().alpha(1f).setDuration(140).start()
+                }.start()
             }
+            ui.pressable(this, 0.9f)
         }
-        accountCard.addView(user)
-        accountCard.addView(FrameLayout(this).apply {
-            addView(pass)
-            addView(toggle, FrameLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT, Gravity.END or Gravity.CENTER_VERTICAL))
-            layoutParams = LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { topMargin = ui.dp(12) }
-        })
-        accountCard.addView(ui.button(if (firstTime) "Save and turn on" else "Save", Style.PRIMARY) {
+        form.addView(fieldBox(user)); form.addView(userErr)
+        form.addView(fieldBox(pass, eye)); form.addView(passErr)
+        listOf(user to userErr, pass to passErr).forEach { (f, err) ->
+            f.addTextChangedListener(object : android.text.TextWatcher {
+                override fun afterTextChanged(e: android.text.Editable?) { if (err.visibility == View.VISIBLE) { err.visibility = View.GONE; ui.setFieldState(f, false) } }
+                override fun beforeTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
+                override fun onTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
+            })
+        }
+        form.addView(ui.button(if (firstTime) "Save and turn on" else "Save") { btn ->
             val u = user.text.toString().trim()
             val p = pass.text.toString()
-            if (u.isEmpty()) { user.error = "Enter your college ID"; user.requestFocus(); return@button }
-            if (p.isEmpty()) { pass.error = "Enter your password"; pass.requestFocus(); return@button }
+            var missing = false
+            for ((f, err, msg) in listOf(Triple(user, userErr, "Enter your college ID"), Triple(pass, passErr, "Enter your password"))) {
+                if (f.text.toString().isBlank()) {
+                    missing = true; err.text = msg; err.visibility = View.VISIBLE
+                    ui.setFieldState(f, true); ui.shake(f)
+                }
+            }
+            if (missing) { (if (u.isEmpty()) user else pass).requestFocus(); return@button }
+            btn.busy("Saving")
             SecurePrefs.save(this, u, p)
-            editing = false
             hideKeyboard()
-            renderAccount(); renderHero()
-            requestNotificationsThenStart()
-        }.apply { (layoutParams as LinearLayout.LayoutParams).topMargin = ui.dp(20) })
-        if (!firstTime) accountCard.addView(ui.button("Cancel", Style.TEXT) {
+            btn.postDelayed({
+                editing = false
+                renderAccount(); renderStatus()
+                requestNotificationsThenStart()
+            }, 350)
+        }.apply { (layoutParams as LinearLayout.LayoutParams).topMargin = ui.dp(24) })
+        if (!firstTime) form.addView(ui.button("Cancel", Style.QUIET) {
             editing = false; hideKeyboard(); renderAccount()
         }.apply { (layoutParams as LinearLayout.LayoutParams).topMargin = ui.dp(4) })
+        accountCard.addView(form)
+    }
+
+    private fun fieldBox(field: EditText, trailing: View? = null) = FrameLayout(this).apply {
+        addView(field)
+        trailing?.let { addView(it, FrameLayout.LayoutParams(ui.dp(44), ui.dp(44), Gravity.END or Gravity.CENTER_VERTICAL).apply { marginEnd = ui.dp(4) }) }
+        layoutParams = LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { topMargin = ui.dp(12) }
+    }
+
+    private fun errorLabel() = ui.label("", 13f, ui.bad.color).apply {
+        visibility = View.GONE; setPadding(ui.dp(4), ui.dp(6), 0, 0)
+        accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE
     }
 
     private fun startEditing() {
         editing = true
         renderAccount()
-        accountCard.post { scroll.smoothScrollTo(0, accountCard.top - ui.dp(56)) }
+        accountCard.post { scroll.smoothScrollTo(0, (accountCard.parent as View).top) }
     }
 
     // ---------- Keep it working ----------
 
     private fun renderChecks() {
         checksCard.removeAllViews()
-        val on = "On" to ui.green
-        val fix = "Fix" to ui.amber
         val notifOn = NotificationManagerCompat.from(this).areNotificationsEnabled()
-        checksCard.addView(ui.row(R.drawable.ic_bell, ui.blue, "Notifications",
-            if (notifOn) "Shows your sign-in status" else "Turn on to see when you're signed in",
-            if (notifOn) on else fix) { openNotificationSettings() })
-        checksCard.addView(ui.divider())
         val bgOn = (getSystemService(POWER_SERVICE) as PowerManager).isIgnoringBatteryOptimizations(packageName)
-        checksCard.addView(ui.row(R.drawable.ic_battery, ui.green, "Run in background",
+        val on = { ui.stateTag("On", ui.ok, dot = true) }
+        val fix = { ui.stateTag("Fix", ui.warn, dot = false) }
+        checksCard.addView(ui.row(R.drawable.ic_bell, "Notifications",
+            if (notifOn) "Shows when you're signed in" else "Turn on to see when you're signed in",
+            if (notifOn) on() else fix()) { openNotificationSettings() })
+        checksCard.addView(ui.divider())
+        checksCard.addView(ui.row(R.drawable.ic_battery, "Run in background",
             if (bgOn) "Keeps automatic sign-in working" else "Your phone may stop automatic sign-in",
-            if (bgOn) on else fix) { if (bgOn) openAppSettings() else askToRunInBackground() })
+            if (bgOn) on() else fix()) { if (bgOn) openAppSettings() else askToRunInBackground() })
         if (Build.MANUFACTURER.lowercase() in AUTOSTART_BRANDS) {
             checksCard.addView(ui.divider())
-            checksCard.addView(ui.row(R.drawable.ic_power, ui.amber, "Autostart",
-                "Needed on ${Build.MANUFACTURER.replaceFirstChar { it.uppercase() }} phones after a restart", null) { openAppSettings() })
+            checksCard.addView(ui.row(R.drawable.ic_power, "Autostart",
+                "${Build.MANUFACTURER.replaceFirstChar { it.uppercase() }} phones need this after a restart") { openAppSettings() })
         }
         checksCard.addView(ui.divider())
-        checksCard.addView(ui.row(R.drawable.ic_open, ui.gray, "Open login page", "Sign in by hand if needed", null, ::openPortal))
+        checksCard.addView(ui.row(R.drawable.ic_open, "Open login page", "Sign in by hand if needed", onClick = ::openPortal))
+        // came back from Settings with something fixed: say so
+        lastChecks?.let { (n, b) ->
+            if (!b && bgOn) ui.toast(host, "Background running allowed")
+            else if (!n && notifOn) ui.toast(host, "Notifications turned on")
+        }
+        lastChecks = notifOn to bgOn
     }
 
     // ---------- Footer ----------
 
     private fun footer() = LinearLayout(this).apply {
-        orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER_HORIZONTAL
-        setPadding(ui.dp(16), ui.dp(32), ui.dp(16), 0)
-        addView(LinearLayout(this@MainActivity).apply {
-            orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER
-            addView(ui.icon(R.drawable.ic_shield, ui.muted, 14))
-            addView(ui.label("Encrypted on your phone · sent only to ABES", 12f, ui.muted)
-                .apply { setPadding(ui.dp(6), 0, 0, 0) })
-        })
-        addView(ui.label("Made by ${Developer.NAME}", 13f, ui.brand, 500).apply {
-            gravity = Gravity.CENTER
-            setPadding(ui.dp(16), ui.dp(12), ui.dp(16), ui.dp(12))
-            background = RippleDrawable(ColorStateList.valueOf(ui.tint(ui.brand, 0.15f)), null, ui.rounded(Color.BLACK, 999))
-            setOnClickListener { startActivity(Intent(this@MainActivity, AboutActivity::class.java)) }
-        }, LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT).apply { topMargin = ui.dp(6) })
+        orientation = LinearLayout.VERTICAL
+        setPadding(ui.dp(8), ui.dp(40), ui.dp(8), 0)
+        addView(ui.label("Your password is encrypted on this phone and only sent to the campus portal.", 13f, ui.muted))
+        addView(ui.textButton("Made by ${People.DEVELOPER.name} and ${People.DESIGNER.name}", 13f) {
+            startActivity(Intent(this@MainActivity, AboutActivity::class.java))
+        }.apply { setPadding(0, ui.dp(10), ui.dp(8), ui.dp(10)) }, LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT).apply { topMargin = ui.dp(4) })
     }
 
     // ---------- Actions ----------

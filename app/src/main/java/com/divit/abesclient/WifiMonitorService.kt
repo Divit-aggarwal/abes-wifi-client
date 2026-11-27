@@ -9,7 +9,7 @@ import java.net.InetSocketAddress
 import java.util.concurrent.Executors
 
 /**
- * Detects the ABES network by checking whether the portal host is reachable on the Wi-Fi network,
+ * Detects the campus network by checking whether the portal host is reachable on the Wi-Fi network,
  * instead of reading the SSID. Since Android 12, apps running in the background get the SSID as
  * "<unknown ssid>" unless they hold background location, so SSID matching silently never fired.
  *
@@ -44,7 +44,7 @@ class WifiMonitorService : Service() {
     override fun onCreate() {
         super.onCreate()
         createChannel()
-        current = notification("Waiting for ABES Wi-Fi", false)
+        current = notification("Waiting for campus Wi-Fi", false)
         startForeground(NOTIF_ID, current!!)
         cm = getSystemService(CONNECTIVITY_SERVICE) as ConnectivityManager
         val request = NetworkRequest.Builder().addTransportType(NetworkCapabilities.TRANSPORT_WIFI).build()
@@ -54,7 +54,7 @@ class WifiMonitorService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         // Every startForegroundService() call must be answered with startForeground(), even when the
         // service is already running, or Android kills the app (seen on Android 15 after tapping Save).
-        startForeground(NOTIF_ID, current ?: notification("Waiting for ABES Wi-Fi", false))
+        startForeground(NOTIF_ID, current ?: notification("Waiting for campus Wi-Fi", false))
         when (intent?.action) {
             ACTION_SIGN_OUT -> io.execute { signOut() }
             // The user asked to sign in (Save, "Sign in now", or the login page finished): send a real login
@@ -92,10 +92,10 @@ class WifiMonitorService : Service() {
             android.util.Log.i("WifiMonitor", "Checking Wi-Fi: online=${key.second} loginRequired=${key.third}")
             if (network == signedOut) return@execute // keep showing "Signed out"
             if (!portalReachable(network)) {
-                setState("other", "Connected to a non-ABES Wi-Fi", false)
+                setState("other", "Connected to a Wi-Fi that isn't campus Wi-Fi", false)
             } else if (c.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)) {
                 triedNetwork = null // online: if the session expires later on this connection, sign in again
-                setState("online", "ABES Wi-Fi: signed in and online", false)
+                setState("online", "Campus Wi-Fi: signed in and online", false)
             } else {
                 autoLogin(network)
             }
@@ -106,21 +106,21 @@ class WifiMonitorService : Service() {
     private fun autoLogin(network: Network) {
         val user = SecurePrefs.username(this)
         val pass = SecurePrefs.password(this)
-        if (user.isEmpty() || pass.isEmpty()) return setState("needs_login", "ABES Wi-Fi needs sign-in. Tap to log in.", true)
+        if (user.isEmpty() || pass.isEmpty()) return setState("needs_login", "Campus Wi-Fi needs sign-in. Tap to log in.", true)
         // onCapabilitiesChanged fires often (e.g. signal strength). Retrying a wrong password could lock the account.
         if (triedNetwork == network) return
         triedNetwork = network
-        setState("signing_in", "Signing in to ABES Wi-Fi…", false)
+        setState("signing_in", "Signing in to campus Wi-Fi…", false)
         val result = DirectLogin.login(network, user, pass)
         when (result.outcome) {
             DirectLogin.Outcome.SIGNED_IN -> {
-                setState("signed_in", "Signed in to ABES Wi-Fi", false)
+                setState("signed_in", "Signed in to campus Wi-Fi", false)
                 cm.reportNetworkConnectivity(network, true) // ask Android to re-check internet now
             }
             DirectLogin.Outcome.WRONG_PASSWORD ->
                 setState("wrong_password", "Wrong username or password. Open the app to fix it, or tap to open the login page.", true)
             DirectLogin.Outcome.UNTRUSTED -> // e.g. a fake hotspot imitating the portal address
-                setState("untrusted", "This Wi-Fi's login page is not the real ABES one (security certificate mismatch). Your password was not sent.", false)
+                setState("untrusted", "This Wi-Fi's login page is not the real campus one (security certificate mismatch). Your password was not sent.", false)
             DirectLogin.Outcome.FAILED ->
                 setState("failed", "Automatic sign-in failed (${result.message}). Tap to open the login page.", true)
         }
@@ -128,10 +128,10 @@ class WifiMonitorService : Service() {
 
     private fun signOut() {
         val network = wifi
-        if (network == null || !portalReachable(network)) return setState("signout_failed", "Not connected to ABES Wi-Fi", false)
+        if (network == null || !portalReachable(network)) return setState("signout_failed", "Not connected to campus Wi-Fi", false)
         if (DirectLogin.logout(network, SecurePrefs.username(this))) {
             signedOut = network
-            setState("signed_out", "Signed out of ABES Wi-Fi. You'll be signed in again next time you connect.", false)
+            setState("signed_out", "Signed out of campus Wi-Fi. You'll be signed in again next time you connect.", false)
             cm.reportNetworkConnectivity(network, false) // let Android notice there's no internet now
         } else {
             setState("signout_failed", "Sign-out failed. Tap to open the login page.", true)
@@ -159,15 +159,15 @@ class WifiMonitorService : Service() {
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
         val pending = PendingIntent.getActivity(this, 1, intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
         return NotificationCompat.Builder(this, channelId)
-            .setSmallIcon(R.drawable.ic_wifi).setColor(0xFF1E5AA8.toInt())
-            .setContentTitle("ABES Wi-Fi").setContentText(message)
+            .setSmallIcon(R.drawable.ic_wifi).setColor(0xFF1E7F4F.toInt())
+            .setContentTitle(getString(R.string.app_name)).setContentText(message)
             .setStyle(NotificationCompat.BigTextStyle().bigText(message))
             .setContentIntent(pending).setOngoing(true).setOnlyAlertOnce(!open)
             .setPriority(if (open) NotificationCompat.PRIORITY_HIGH else NotificationCompat.PRIORITY_LOW).build()
     }
 
     private fun createChannel() {
-        val channel = NotificationChannel(channelId, "ABES Wi-Fi status", NotificationManager.IMPORTANCE_DEFAULT)
+        val channel = NotificationChannel(channelId, "Wi-Fi status", NotificationManager.IMPORTANCE_DEFAULT)
         (getSystemService(NOTIFICATION_SERVICE) as NotificationManager).createNotificationChannel(channel)
     }
 

@@ -6,7 +6,7 @@ import org.junit.Test
 import java.security.cert.CertificateFactory
 import java.security.cert.X509Certificate
 
-/** Certificates captured from the real ABES portal (192.168.1.254:8090) on 2026-11-23. */
+/** Certificates captured from the real campus portal (192.168.1.254:8090) on 2026-11-23. */
 class PortalCertTest {
     private fun load(name: String) = javaClass.classLoader!!.getResourceAsStream(name).use {
         CertificateFactory.getInstance("X.509").generateCertificate(it) as X509Certificate

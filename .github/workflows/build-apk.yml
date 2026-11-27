@@ -15,5 +15,5 @@ jobs:
       - run: ./gradlew assembleDebug --stacktrace
       - uses: actions/upload-artifact@v4
         with:
-          name: abes-wifi-client-debug-apk
+          name: wifi-debug-apk
           path: app/build/outputs/apk/debug/*.apk

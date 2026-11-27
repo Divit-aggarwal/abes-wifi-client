@@ -22,7 +22,7 @@ object DirectLogin {
 
     private const val TAG = "DirectLogin"
 
-    /** Signs in over [network] (the ABES Wi-Fi), even if Android routes other traffic over mobile data. */
+    /** Signs in over [network] (the campus Wi-Fi), even if Android routes other traffic over mobile data. */
     fun login(network: Network, username: String, password: String): Result = try {
         parse(post(network, "login.xml", "mode" to "191", "username" to username, "password" to password))
             .also { Log.i(TAG, "Login result: ${it.outcome}") }
@@ -71,10 +71,10 @@ object DirectLogin {
         }
     }
 
-    /** The TLS handshake failed because the server isn't the pinned ABES portal: nothing was sent. */
+    /** The TLS handshake failed because the server isn't the pinned campus portal: nothing was sent. */
     private fun isUntrusted(e: Throwable) = generateSequence(e) { it.cause }.any { it is UntrustedPortal }
 
-    private class UntrustedPortal : CertificateException("Not the pinned ABES portal certificate")
+    private class UntrustedPortal : CertificateException("Not the pinned campus portal certificate")
 
     private fun tag(xml: String, name: String) =
         Regex("<$name>\\s*(?:<!\\[CDATA\\[)?(.*?)(?:]]>)?\\s*</$name>", RegexOption.DOT_MATCHES_ALL)
@@ -84,7 +84,7 @@ object DirectLogin {
         fields.joinToString("&") { (k, v) -> "$k=${URLEncoder.encode(v, "UTF-8")}" }
 
     // The portal's certificate is self-signed, so no CA check can pass. Instead this trust manager
-    // accepts exactly one key: the pinned ABES portal certificate (see PortalCert). The handshake fails
+    // accepts exactly one key: the pinned campus portal certificate (see PortalCert). The handshake fails
     // before any form data is sent otherwise. It is attached only to the portal connections above
     // (never installed globally), so every other HTTPS connection keeps normal certificate checks.
     @SuppressLint("CustomX509TrustManager")
