@@ -1,4 +1,4 @@
-# WIFI 1.1.0
+# WIFI 1.1.1
 
 Signs you in to the campus Wi-Fi (Sophos login page at
 `https://192.168.1.254:8090/httpclient.html`) automatically.
@@ -14,7 +14,9 @@ Signs you in to the campus Wi-Fi (Sophos login page at
 3. If campus Wi-Fi is connected but not online, the app **signs in directly**: it sends your details
    to the portal's `login.xml` over the Wi-Fi network itself, then shows *signed in*, *wrong password*
    or *failed* (with the portal's own message) in the notification. It tries once per Wi-Fi
-   connection, so a wrong password is never resent.
+   connection, so a wrong password is never resent. Automatic logins are also rate-limited (at least
+   30 s apart, at most 3 per 10 minutes) and portal checks are cached for 60 s, so a flapping
+   connection can't flood the portal and get you banned. Tapping *Sign in now* or *Save* always works.
    **Security:** your password is only sent to a server presenting the real campus portal certificate
    (pinned in `PortalCert`). A fake hotspot imitating the address gets nothing, and you're told why.
 4. **Fallback:** tap the notification to open the login page in the app; it fills in and submits

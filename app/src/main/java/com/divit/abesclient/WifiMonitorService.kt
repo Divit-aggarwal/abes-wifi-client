@@ -23,6 +23,8 @@ class WifiMonitorService : Service() {
     @Volatile private var wifi: Network? = null         // the current Wi-Fi connection, if any
     @Volatile private var triedNetwork: Network? = null // auto-login already attempted on this connection
     @Volatile private var signedOut: Network? = null    // user signed out: stay out until the next connection
+    private val throttle = LoginThrottle()
+    private var probe: Triple<Network, Boolean, Long>? = null // (network, isCampus, when); io thread only
     private var lastChecked: Triple<Network, Boolean, Boolean>? = null // (network, online, portal-flagged); io thread only
 
     private val callback = object : ConnectivityManager.NetworkCallback() {
@@ -65,7 +67,7 @@ class WifiMonitorService : Service() {
                 signedOut = null
                 lastState = ""
                 val network = wifi ?: return@execute
-                if (portalReachable(network)) autoLogin(network) else check(network)
+                if (portalReachable(network)) autoLogin(network, manual = true) else check(network)
             }
         }
         return START_STICKY
@@ -90,7 +92,7 @@ class WifiMonitorService : Service() {
             lastChecked = key
             android.util.Log.i("WifiMonitor", "Checking Wi-Fi: online=${key.second} loginRequired=${key.third}")
             if (network == signedOut) return@execute // keep showing "Signed out"
-            if (!portalReachable(network)) {
+            if (!cachedProbe(network)) {
                 setState("other", "Connected to a Wi-Fi that isn't campus Wi-Fi", false)
             } else if (c.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)) {
                 triedNetwork = null // online: if the session expires later on this connection, sign in again
@@ -102,12 +104,16 @@ class WifiMonitorService : Service() {
     }
 
     /** Tries the direct login once per Wi-Fi connection; the notification falls back to the login page. */
-    private fun autoLogin(network: Network) {
+    private fun autoLogin(network: Network, manual: Boolean = false) {
         val user = SecurePrefs.username(this)
         val pass = SecurePrefs.password(this)
         if (user.isEmpty() || pass.isEmpty()) return setState("needs_login", "Campus Wi-Fi needs sign-in. Tap to log in.", true)
         // onCapabilitiesChanged fires often (e.g. signal strength). Retrying a wrong password could lock the account.
         if (triedNetwork == network) return
+        if (!manual && !throttle.allow()) {
+            android.util.Log.w("WifiMonitor", "Login skipped: too many recent attempts")
+            return
+        }
         triedNetwork = network
         setState("signing_in", "Signing in to campus Wi-Fi…", false)
         val result = DirectLogin.login(network, user, pass)
@@ -135,6 +141,13 @@ class WifiMonitorService : Service() {
         } else {
             setState("signout_failed", "Sign-out failed. Tap to open the login page.", true)
         }
+    }
+
+    /** Automatic re-checks reuse a recent answer for 60 s, so a flapping connection doesn't re-probe the portal. */
+    private fun cachedProbe(network: Network): Boolean {
+        val p = probe
+        if (p != null && p.first == network && System.currentTimeMillis() - p.third < 60_000) return p.second
+        return portalReachable(network).also { probe = Triple(network, it, System.currentTimeMillis()) }
     }
 
     /** True only on the real campus Wi-Fi (pinned portal certificate); on any other Wi-Fi the app stays asleep. */
