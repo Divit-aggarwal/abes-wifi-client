@@ -3,6 +3,7 @@ package com.divit.abesclient
 import android.annotation.SuppressLint
 import android.net.Network
 import android.util.Log
+import java.net.InetSocketAddress
 import java.net.URL
 import java.net.URLEncoder
 import java.security.cert.CertificateException
@@ -10,6 +11,7 @@ import java.security.cert.X509Certificate
 import javax.net.ssl.HostnameVerifier
 import javax.net.ssl.HttpsURLConnection
 import javax.net.ssl.SSLContext
+import javax.net.ssl.SSLSocket
 import javax.net.ssl.X509TrustManager
 
 /**
@@ -40,6 +42,19 @@ object DirectLogin {
         Log.w(TAG, "Logout request failed: ${e.javaClass.simpleName}")
         false
     }
+
+    /**
+     * True only if [network] has a server at the portal address that presents the pinned campus certificate.
+     * Any other Wi-Fi (home router, hotspot, fake portal) fails the handshake: no request is sent to it.
+     */
+    fun isCampusPortal(network: Network): Boolean = runCatching {
+        network.socketFactory.createSocket().use { plain ->
+            plain.connect(InetSocketAddress(Portal.HOST, Portal.PORT), 1500)
+            plain.soTimeout = 3000
+            (portalOnlySsl.socketFactory.createSocket(plain, Portal.HOST, Portal.PORT, false) as SSLSocket).startHandshake()
+        }
+        true
+    }.getOrDefault(false)
 
     /** Reads Sophos's reply, e.g. <status><![CDATA[LIVE]]></status><message><![CDATA[You are signed in as ...]]></message>. */
     fun parse(xml: String): Result {

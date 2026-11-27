@@ -5,11 +5,10 @@ import android.content.*
 import android.net.*
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
-import java.net.InetSocketAddress
 import java.util.concurrent.Executors
 
 /**
- * Detects the campus network by checking whether the portal host is reachable on the Wi-Fi network,
+ * Detects the campus network by checking that the portal address presents the pinned campus certificate,
  * instead of reading the SSID. Since Android 12, apps running in the background get the SSID as
  * "<unknown ssid>" unless they hold background location, so SSID matching silently never fired.
  *
@@ -138,13 +137,8 @@ class WifiMonitorService : Service() {
         }
     }
 
-    /** True if the portal's host:port accepts a TCP connection over this specific Wi-Fi network. */
-    private fun portalReachable(network: Network): Boolean = runCatching {
-        network.socketFactory.createSocket().use {
-            it.connect(InetSocketAddress(Portal.HOST, Portal.PORT), 1500)
-        }
-        true
-    }.getOrDefault(false)
+    /** True only on the real campus Wi-Fi (pinned portal certificate); on any other Wi-Fi the app stays asleep. */
+    private fun portalReachable(network: Network) = DirectLogin.isCampusPortal(network)
 
     private fun setState(state: String, message: String, open: Boolean) {
         if (state == lastState) return

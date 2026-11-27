@@ -1,4 +1,4 @@
-# WIFI 1.0.0
+# WIFI 1.1.0
 
 Signs you in to the campus Wi-Fi (Sophos login page at
 `https://192.168.1.254:8090/httpclient.html`) automatically.
@@ -7,8 +7,10 @@ Signs you in to the campus Wi-Fi (Sophos login page at
 
 1. You save your college username and password once. They are stored encrypted on the phone
    (AndroidX EncryptedSharedPreferences) and excluded from backups and phone-to-phone transfer.
-2. A background service watches Wi-Fi. It treats a network as campus Wi-Fi when `192.168.1.254:8090`
-   answers on it (no Wi-Fi name or location permission needed).
+2. A background service watches Wi-Fi. It treats a network as campus Wi-Fi only when
+   `192.168.1.254:8090` presents the pinned campus portal certificate (no Wi-Fi name or location
+   permission needed). On any other Wi-Fi (home, hotspot, fake portal) the handshake fails, nothing
+   is sent, and the app sleeps until the next connection.
 3. If campus Wi-Fi is connected but not online, the app **signs in directly**: it sends your details
    to the portal's `login.xml` over the Wi-Fi network itself, then shows *signed in*, *wrong password*
    or *failed* (with the portal's own message) in the notification. It tries once per Wi-Fi
@@ -39,6 +41,8 @@ Signs you in to the campus Wi-Fi (Sophos login page at
 2. Allow notifications when asked (monitoring still runs if you don't, you just won't see status).
 3. When asked, let the app run in the background (battery: *Unrestricted*). On Xiaomi, Oppo, Vivo,
    Realme and OnePlus phones also turn on *Autostart* for the app, or it may stop after a reboot.
+
+The **About** button in the top right of the main screen opens the makers' page.
 
 Works on Android 8.0 (API 26) and newer. No location permission, no Google Play Services.
 

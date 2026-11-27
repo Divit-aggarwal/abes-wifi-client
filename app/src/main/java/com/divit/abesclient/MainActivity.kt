@@ -112,9 +112,9 @@ class MainActivity : Activity() {
         minimumHeight = ui.dp(56)
         setPadding(ui.dp(4), 0, 0, 0)
         addView(ui.label(getString(R.string.app_name), 20f, ui.ink, bold = true), LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
-        addView(ui.iconButton(R.drawable.ic_info, "About the app's makers") {
+        addView(ui.button("About", Ui.Style.SECONDARY, small = true) {
             startActivity(Intent(this@MainActivity, AboutActivity::class.java))
-        }.apply { (layoutParams as LinearLayout.LayoutParams).marginEnd = -ui.dp(10) })
+        })
     }
 
     // ---------- Status card ----------
